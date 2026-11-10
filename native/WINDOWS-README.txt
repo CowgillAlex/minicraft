@@ -1,7 +1,7 @@
-MINICRAFT v0.10.0
+MINICRAFT v0.11.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.10.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.11.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -10,7 +10,8 @@ Generation and GPU preparation run in the background. Resize, minimize or
 close the window normally; Escape cancels loading. The normal world menu
 appears when ready. Full-height terrain now uses cached interpolation, exact
 uniform-region skipping and compressed uniform pages. Nearby meshes stream
-as you move; terrain material generation finishes before play.
+as you move, together with new terrain and lighting. Only the spawn area
+is prepared before play.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
@@ -25,7 +26,9 @@ Fog has an on/off toggle, a start distance and strength from 25% to 200%.
 Fog start scales with render distance. The default is 24 metres of terrain,
 fog starting at 20 metres, and 100% strength. Restore defaults resets these
 controls. Changes apply immediately; extra meshes load in the background.
-Longer distances use more GPU memory and draw more geometry.
+Longer distances take more time to generate and draw more geometry. Bounded
+caches may fill before the selected distance is reached in dense caves.
+Loading terrain shows pending work; Terrain cache full indicates this limit.
 F1 shows controls and F3 shows debug info. Night vision is in Settings or
 on F6. It reveals dark caves without changing the clock or rebaking light.
 Title screen in the world menu lets you choose another seed. Creating a new
@@ -93,9 +96,10 @@ Try approximately 18:30-21:00 for the strongest warm/cool contrast.
 Water receives sunlight/moonlight shadows and sky occlusion. Wave highlights
 use actual light instead of adding a bright unlit ripple pattern.
 
-Lighting repairs only affected light paths after edits and uploads only the
-changed region. Completed updates appear while editing continues, without
-waiting for a whole-world bake. LIGHT BAKE indicates any pending work.
+Infinite worlds bake light in nearby 8 metre regions with a lighting halo.
+Edits rebuild affected regions in the background. The village retains its
+incremental light updates. Completed updates appear while editing continues.
+Loading terrain or Updating light indicates pending work.
 Geometry updates immediately.
 Sun shadows refresh when time or geometry changes. Lamp and sky propagation
 are cached independently of time. Bloom runs at quarter resolution and AO
@@ -104,28 +108,35 @@ not a separate ray-traced point shadow for every lamp.
 
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
-The default scene is a finite 40 x 384 x 40 metre noise preview containing
-only stone, water and air. It ports the Paper-Minecraft PR #1 density graph
-and aquifer rules. Terrain is sampled every 6.25 cm at its original scale.
-The title screen chooses the seed. The default origin is 120,-64,-20. The full -64 to 320 metre range is loaded.
+The default scene streams an infinite horizontal world containing only stone,
+water and air. It ports the Paper-Minecraft PR #1 density graph and aquifer
+rules. Terrain is sampled every 6.25 cm at its original scale. The title
+screen chooses the seed. The default source origin is 120,-64,-20, covering
+the full -64 to 320 metre vertical range. Only nearby terrain is resident.
+
 Uniform 2 metre pages use one material value; mixed pages retain fine voxels.
-Nearby meshes stream within render distance plus a 4 metre loading margin.
-Render distance and fog can be controlled separately in Settings. The world
-remains a finite 40 x 384 x 40 metre column.
+Terrain, meshes and light stream within render distance plus a 4 metre margin.
+Walking and flight stop at unloaded terrain. Spectator can travel ahead of
+loading. R waits for spawn terrain before resuming physics. Generated data
+and graphics use bounded caches; edits and doors survive leaving and returning
+in RAM. Creating another world or exiting discards them. No disk saves.
+
 Packed 28-byte GPU vertices reduce mesh bandwidth and memory. Fully fogged
-chunks are culled. Streaming shadow refreshes are limited to eight per second;
-voxel edits, doors and time changes still refresh shadows immediately.
-Horizontal infinite generation and persistent saves are not implemented.
+chunks are culled. Shadows follow the camera as the world streams. Sun and
+moon discs stay behind terrain, including at long distances in heavy fog.
+Streaming shadow refreshes are limited to eight per second; voxel edits, doors
+and time changes still refresh shadows immediately.
 
 Optional launch arguments:
 --seed 1                     Choose a signed 64-bit seed.
---height 12                  Use the old short preview near sea level.
+--height 12                  Restrict vertical range near sea level.
+--finite                     Use the old finite 40 metre wide preview.
 --origin 120,58,-20           Choose lower corner; defaults to 12m height.
---height 384 --origin 0,-64,0 Choose another full-height column.
+--height 384 --origin 0,-64,0 Choose another full-height source origin.
 --scene village               Open the previous village with doors and lamps.
 --noise-sample 120.0625,63,0   Print density and material without a GPU.
 --noise-benchmark             Measure a 32-cubed voxel page without a GPU.
---worldgen-benchmark          Time generation of the selected entire volume.
+--worldgen-benchmark          Time a finite 40 metre wide volume.
 --reference-worldgen         Disable uniform skipping/prepared evaluation.
 
 Aquifers now use 3D seeded cells, full X/Z surface checks and 3D pressure
@@ -140,7 +151,7 @@ walking and flight collide with individual fine voxels, including glass.
 Water and flowers do not collide; swimming is not simulated yet.
 Physics ticks at 20 TPS; rendering interpolates positions between ticks
 and mouse look remains immediate. Menus freeze physics. Blocks cannot be
-placed inside your body. World edges and the bottom are solid outside spectator mode.
+placed inside your body. The world bottom and unloaded terrain are solid outside spectator mode.
 This version has no car physics or AI.
 
 ERRORS

@@ -1,8 +1,17 @@
+use crate::chunk::Chunk;
 use glam::Vec3;
+#[path = "world_read.rs"]
+mod read;
+pub use read::Reader;
 #[path = "door_world.rs"]
 mod door_world;
 pub use door_world::DoorAction;
-use std::{collections::HashSet, sync::Arc};
+#[path = "world_village.rs"]
+mod village;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 pub const CHUNK: usize = 32;
 pub const NX: usize = 20;
@@ -36,10 +45,13 @@ pub fn opaque(material: u8) -> bool {
 
 #[derive(Clone)]
 pub struct World {
-    chunks: Vec<Option<crate::chunk::Chunk>>,
+    chunks: HashMap<[i32; 3], crate::chunk::Chunk>,
+    pub infinite: bool,
+    pub spawn: Option<Vec3>,
+    edits: HashMap<[i32; 3], HashMap<usize, u8>>,
     height: i32,
     pub max_occupied_y: i32,
-    door_chunks: Vec<Option<Arc<[u8]>>>,
+    door_chunks: HashMap<[i32; 3], Arc<[u8]>>,
     pub doors: Vec<crate::doors::Door>,
     loose_handles: HashSet<[i32; 3]>,
     pub emitters: HashSet<[i32; 3]>,
@@ -52,18 +64,23 @@ impl World {
     }
     pub fn with_height(height: i32) -> Self {
         assert!(height > 0 && height % CHUNK as i32 == 0);
-        let count = NX * NZ * (height as usize / CHUNK);
         Self {
-            chunks: vec![None; count],
+            chunks: HashMap::new(),
+            infinite: false,
+            spawn: None,
+            edits: HashMap::new(),
             height,
             max_occupied_y: 0,
-            door_chunks: vec![None; count],
+            door_chunks: HashMap::new(),
             doors: Vec::new(),
             loose_handles: HashSet::new(),
             voxels: 0,
             emitters: HashSet::new(),
             noise_preview: None,
         }
+    }
+    pub fn reader(&self) -> Reader<'_> {
+        Reader::new(self)
     }
     pub fn height(&self) -> i32 {
         self.height
@@ -73,63 +90,88 @@ impl World {
     }
     pub fn voxel_storage_bytes(&self) -> usize {
         self.chunks
-            .iter()
-            .flatten()
+            .values()
             .map(|chunk| match chunk {
                 crate::chunk::Chunk::Uniform(_) => 1,
-                crate::chunk::Chunk::Dense(cells) => cells.len(),
+                crate::chunk::Chunk::Dense { cells, .. } => cells.len(),
             })
             .sum()
     }
     pub(crate) fn insert_chunk(&mut self, chunk: [usize; 3], data: crate::chunk::Chunk) {
+        self.insert_page(chunk.map(|v| v as i32), data);
+    }
+    pub(crate) fn insert_page(&mut self, key: [i32; 3], mut data: crate::chunk::Chunk) {
+        if let Some(edits) = self.edits.get(&key) {
+            for (&i, &material) in edits {
+                data.set(i, material);
+            }
+        }
+        self.voxels -= self.chunks.get(&key).map_or(0, |c| c.occupied());
         let count = data.occupied();
+        self.voxels += count;
         if count > 0 {
-            self.voxels += count;
-            self.max_occupied_y = self
-                .max_occupied_y
-                .max((chunk[1] as i32 + 1) * CHUNK as i32);
-            self.chunks[chunk[0] + NX * chunk[2] + NX * NZ * chunk[1]] = Some(data);
+            self.max_occupied_y = self.max_occupied_y.max((key[1] + 1) * CHUNK as i32);
+        }
+        if self.infinite || count > 0 {
+            self.chunks.insert(key, data);
+        } else {
+            self.chunks.remove(&key);
         }
     }
-    fn address(&self, x: i32, y: i32, z: i32) -> Option<(usize, usize)> {
-        if !(0..WIDTH).contains(&x) || !(0..self.height).contains(&y) || !(0..DEPTH).contains(&z) {
-            return None;
-        }
-        let (x, y, z) = (x as usize, y as usize, z as usize);
-        Some((
-            (x / CHUNK) + NX * (z / CHUNK) + NX * NZ * (y / CHUNK),
-            (x % CHUNK) + CHUNK * (z % CHUNK) + CHUNK * CHUNK * (y % CHUNK),
-        ))
+    pub fn contains(&self, cell: [i32; 3]) -> bool {
+        (0..self.height).contains(&cell[1])
+            && if self.infinite {
+                let origin = self.noise_preview.map_or([0; 3], |p| p.origin);
+                [0, 2]
+                    .into_iter()
+                    .all(|i| (i64::from(cell[i]) + i64::from(origin[i]) * 16).abs() <= 480_000_000)
+            } else {
+                (0..WIDTH).contains(&cell[0]) && (0..DEPTH).contains(&cell[2])
+            }
+    }
+    fn address(&self, x: i32, y: i32, z: i32) -> Option<([i32; 3], usize)> {
+        self.contains([x, y, z]).then(|| {
+            (
+                [x, y, z].map(|v| v.div_euclid(CHUNK as i32)),
+                x.rem_euclid(CHUNK as i32) as usize
+                    + CHUNK
+                        * (z.rem_euclid(CHUNK as i32) as usize
+                            + CHUNK * y.rem_euclid(CHUNK as i32) as usize),
+            )
+        })
     }
     pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
-        let Some((chunk, index)) = self.address(x, y, z) else {
+        let Some((key, index)) = self.address(x, y, z) else {
             return AIR;
         };
-        let material = self.chunks[chunk]
-            .as_ref()
-            .map_or(AIR, |data| data.get(index));
+        let material = self.chunks.get(&key).map_or(AIR, |c| c.get(index));
         if material != AIR {
-            return material;
+            material
+        } else {
+            self.door_chunks.get(&key).map_or(AIR, |c| c[index])
         }
-        self.door_chunks[chunk]
-            .as_ref()
-            .map_or(AIR, |data| data[index])
     }
     pub fn get_static(&self, x: i32, y: i32, z: i32) -> u8 {
         self.address(x, y, z)
-            .and_then(|(chunk, index)| self.chunks[chunk].as_ref().map(|data| data.get(index)))
+            .and_then(|(key, index)| self.chunks.get(&key).map(|c| c.get(index)))
             .unwrap_or(AIR)
     }
     pub fn set(&mut self, x: i32, y: i32, z: i32, material: u8) {
-        if let Some((chunk, index)) = self.address(x, y, z) {
-            if material == AIR && self.chunks[chunk].is_none() {
+        if let Some((key, index)) = self.address(x, y, z) {
+            if material == AIR && !self.infinite && !self.chunks.contains_key(&key) {
                 return;
             }
-            let data = self.chunks[chunk].get_or_insert(crate::chunk::Chunk::Uniform(AIR));
+            let data = self
+                .chunks
+                .entry(key)
+                .or_insert(crate::chunk::Chunk::Uniform(AIR));
             let previous = data.get(index);
             self.voxels += usize::from(previous == AIR && material != AIR);
             self.voxels -= usize::from(previous != AIR && material == AIR);
             data.set(index, material);
+            if self.infinite {
+                self.edits.entry(key).or_default().insert(index, material);
+            }
             if material != AIR {
                 self.max_occupied_y = self.max_occupied_y.max(y + 1);
             }
@@ -148,21 +190,79 @@ impl World {
         }
     }
     pub fn chunk_exists(&self, x: usize, y: usize, z: usize) -> bool {
-        self.chunks[x + NX * z + NX * NZ * y].is_some()
+        self.has_geometry([x as i32, y as i32, z as i32])
+    }
+    pub fn has_geometry(&self, key: [i32; 3]) -> bool {
+        self.chunks.get(&key).is_some_and(|c| c.occupied() > 0)
+    }
+    pub fn is_loaded(&self, cell: [i32; 3]) -> bool {
+        !self.infinite
+            || self
+                .chunks
+                .contains_key(&cell.map(|v| v.div_euclid(CHUNK as i32)))
+    }
+    pub fn has_overlay(&self, key: [i32; 3]) -> bool {
+        self.door_chunks.contains_key(&key)
+    }
+    pub fn page(&self, key: [i32; 3]) -> Option<&crate::chunk::Chunk> {
+        self.chunks.get(&key)
+    }
+    pub fn pages(&self) -> impl Iterator<Item = ([i32; 3], &crate::chunk::Chunk)> {
+        self.chunks.iter().map(|(k, v)| (*k, v))
+    }
+    pub fn unload(&mut self, key: [i32; 3]) {
+        if let Some(c) = self.chunks.remove(&key) {
+            self.voxels -= c.occupied();
+        }
+    }
+    pub fn copy_edits_from(&mut self, source: &World) {
+        self.edits = source.edits.clone();
+        self.doors = source.doors.clone();
+        self.door_chunks = source.door_chunks.clone();
+        self.emitters = source.emitters.clone();
+        self.loose_handles = source.loose_handles.clone();
+        for (key, edits) in &self.edits {
+            if let Some(page) = self.chunks.get_mut(key) {
+                self.voxels -= page.occupied();
+                for (&index, &material) in edits {
+                    page.set(index, material);
+                }
+                self.voxels += page.occupied();
+            }
+        }
+    }
+    pub fn column_overrides(&self, x: i32, z: i32) -> std::collections::BTreeMap<i32, u8> {
+        let mut values = std::collections::BTreeMap::new();
+        let cx = x.div_euclid(CHUNK as i32);
+        let cz = z.div_euclid(CHUNK as i32);
+        let horizontal =
+            x.rem_euclid(CHUNK as i32) as usize + CHUNK * z.rem_euclid(CHUNK as i32) as usize;
+        for (key, edits) in &self.edits {
+            if key[0] == cx && key[2] == cz {
+                for (&index, &material) in edits {
+                    if index % (CHUNK * CHUNK) == horizontal {
+                        values.insert(
+                            key[1] * CHUNK as i32 + (index / (CHUNK * CHUNK)) as i32,
+                            material,
+                        );
+                    }
+                }
+            }
+        }
+        for (key, cells) in &self.door_chunks {
+            if key[0] == cx && key[2] == cz {
+                for y in 0..CHUNK {
+                    let m = cells[horizontal + y * CHUNK * CHUNK];
+                    if m != AIR {
+                        values.insert(key[1] * CHUNK as i32 + y as i32, m);
+                    }
+                }
+            }
+        }
+        values
     }
     pub fn buried_chunk(&self, chunk: [i32; 3]) -> bool {
-        let full = |p: [i32; 3]| {
-            if p[0] < 0
-                || p[1] < 0
-                || p[2] < 0
-                || p[0] >= NX as i32
-                || p[1] >= self.chunks_y() as i32
-                || p[2] >= NZ as i32
-            {
-                return false;
-            }
-            matches!(self.chunks[p[0] as usize+NX*p[2] as usize+NX*NZ*p[1] as usize],Some(crate::chunk::Chunk::Uniform(material)) if opaque(material))
-        };
+        let full = |key| matches!(self.chunks.get(&key),Some(crate::chunk::Chunk::Uniform(material)) if opaque(*material));
         full(chunk)
             && [
                 [1, 0, 0],
@@ -178,252 +278,8 @@ impl World {
     pub fn meters(x: i32, y: i32, z: i32) -> Vec3 {
         Vec3::new((x - WIDTH / 2) as f32, y as f32, (z - DEPTH / 2) as f32) * VOXEL
     }
-    pub fn generate() -> Self {
-        let mut world = Self::empty();
-        for z in 0..DEPTH {
-            for x in 0..WIDTH {
-                let h = terrain_height(x, z);
-                let lake = lake_distance(x, z) < 1.0;
-                let h = if lake {
-                    (h - ((1.0 - lake_distance(x, z)) * 18.0) as i32).max(6)
-                } else {
-                    h
-                };
-                for y in 0..=h {
-                    world.set(
-                        x,
-                        y,
-                        z,
-                        if y == h {
-                            if lake {
-                                SAND
-                            } else {
-                                GRASS
-                            }
-                        } else if y > h - 4 {
-                            DIRT
-                        } else {
-                            STONE
-                        },
-                    );
-                }
-                if lake {
-                    for y in h + 1..=20 {
-                        world.set(x, y, z, WATER);
-                    }
-                }
-                let road = road_center(x);
-                if (z - road).abs() < 22 {
-                    for y in 26..=40 {
-                        world.set(x, y, z, AIR);
-                    }
-                    for y in h.min(24)..=24 {
-                        world.set(x, y, z, DIRT);
-                    }
-                    let material = if (z - road).abs() >= 19 {
-                        STONE
-                    } else if (z - road).abs() <= 1 && x.rem_euclid(44) < 23 {
-                        PAINT
-                    } else {
-                        ROAD
-                    };
-                    world.set(x, 25, z, material);
-                }
-                if !lake && (z - road).abs() > 35 && hash(x, z, 17).is_multiple_of(233) {
-                    world.set(x, h + 1, z, LEAF);
-                    world.set(x, h + 2, z, FLOWER);
-                }
-            }
-        }
-        for (x, z) in [(155, 205), (348, 445), (490, 230)] {
-            world.cabin(x, z);
-        }
-        for (i, (x, z)) in [
-            (57, 70),
-            (128, 95),
-            (230, 72),
-            (340, 90),
-            (425, 105),
-            (566, 80),
-            (600, 210),
-            (58, 235),
-            (265, 230),
-            (54, 430),
-            (152, 490),
-            (220, 545),
-            (320, 560),
-            (445, 540),
-            (560, 490),
-            (595, 595),
-            (85, 585),
-        ]
-        .iter()
-        .enumerate()
-        {
-            world.tree(*x, *z, i as i32);
-        }
-        for x in (65..WIDTH - 40).step_by(90) {
-            let z = road_center(x) + if x % 2 == 0 { 28 } else { -28 };
-            for y in 25..74 {
-                world.cuboid([x, y, z], [x + 2, y, z + 2], WOOD);
-            }
-            world.cuboid([x - 2, 70, z - 2], [x + 4, 75, z + 4], STONE);
-            world.cuboid([x - 1, 70, z - 1], [x + 3, 74, z + 3], LIGHT);
-        }
-        // Footbridge over the pond, with narrow rails and individual planks.
-        for x in 362..550 {
-            let z = 165;
-            for zz in z - 9..=z + 9 {
-                world.set(x, 25, zz, if x % 7 == 0 { DIRT } else { WOOD });
-            }
-            for zz in [z - 10, z + 10] {
-                world.set(x, 37, zz, WOOD);
-                if x % 24 < 2 {
-                    for y in 22..38 {
-                        world.set(x, y, zz, WOOD);
-                    }
-                }
-            }
-        }
-        world
-    }
-    fn cuboid(&mut self, min: [i32; 3], max: [i32; 3], material: u8) {
-        for y in min[1]..=max[1] {
-            for z in min[2]..=max[2] {
-                for x in min[0]..=max[0] {
-                    self.set(x, y, z, material);
-                }
-            }
-        }
-    }
-    fn cabin(&mut self, cx: i32, cz: i32) {
-        let base = terrain_height(cx, cz) + 2;
-        self.cuboid([cx - 38, 0, cz - 34], [cx + 38, base, cz + 34], STONE);
-        self.cuboid(
-            [cx - 32, base + 1, cz - 28],
-            [cx + 32, base + 43, cz + 28],
-            AIR,
-        );
-        for y in base + 1..base + 43 {
-            for x in cx - 32..=cx + 32 {
-                for z in cz - 28..=cz + 28 {
-                    if (x - cx).abs() >= 30 || (z - cz).abs() >= 26 {
-                        let window = y > base + 16
-                            && y < base + 32
-                            && (((z - cz).abs() >= 26 && ((x - cx).abs() - 18).abs() < 7)
-                                || ((x - cx).abs() >= 30 && (z - cz).abs() < 9));
-                        let door = z >= cz + 26 && x >= cx - 8 && x < cx + 8 && y < base + 34;
-                        self.set(
-                            x,
-                            y,
-                            z,
-                            if door {
-                                AIR
-                            } else if window {
-                                let edge = y == base + 17
-                                    || y == base + 31
-                                    || ((z - cz).abs() >= 26
-                                        && ((x - cx).abs() == 12 || (x - cx).abs() == 24))
-                                    || ((x - cx).abs() >= 30 && (z - cz).abs() == 8);
-                                if edge {
-                                    WOOD
-                                } else {
-                                    GLASS
-                                }
-                            } else if y % 9 == 0 {
-                                WOOD
-                            } else {
-                                WALL
-                            },
-                        );
-                    }
-                }
-            }
-        }
-        self.cuboid(
-            [cx - 29, base + 1, cz - 25],
-            [cx + 29, base + 1, cz + 25],
-            WOOD,
-        );
-        self.cuboid(
-            [cx - 4, base + 40, cz - 4],
-            [cx + 4, base + 41, cz + 4],
-            WOOD,
-        );
-        self.cuboid(
-            [cx - 3, base + 39, cz - 3],
-            [cx + 3, base + 39, cz + 3],
-            LIGHT,
-        );
-        // A low wooden table gives the interior light visible surfaces to fall on.
-        self.cuboid(
-            [cx - 12, base + 12, cz - 6],
-            [cx + 12, base + 13, cz + 6],
-            WOOD,
-        );
-        for x in [cx - 10, cx + 10] {
-            for z in [cz - 4, cz + 4] {
-                self.cuboid([x, base + 2, z], [x + 1, base + 11, z + 1], WOOD);
-            }
-        }
-        for x in cx - 37..=cx + 37 {
-            let roof_y = base + 43 + (37 - (x - cx).abs()) * 3 / 4;
-            for z in cz - 33..=cz + 33 {
-                self.set(x, roof_y, z, ROOF);
-                self.set(x, roof_y + 1, z, ROOF);
-                if (z - cz).abs() == 27 && (x - cx).abs() < 31 {
-                    for y in base + 43..roof_y {
-                        self.set(x, y, z, WALL);
-                    }
-                }
-            }
-        }
-        self.cuboid(
-            [cx + 16, base + 51, cz - 13],
-            [cx + 22, base + 83, cz - 7],
-            STONE,
-        );
-        self.cuboid([cx - 18, base, cz + 35], [cx + 18, base + 1, cz + 48], WOOD);
-        for z in cz + 49..road_center(cx) - 23 {
-            for x in cx - 8..=cx + 8 {
-                let h = terrain_height(x, z);
-                self.set(x, h + 1, z, SAND);
-            }
-        }
-        for x in [cx - 9, cx + 8] {
-            self.cuboid([x, base + 2, cz + 26], [x, base + 34, cz + 28], WOOD);
-        }
-        self.cuboid(
-            [cx - 9, base + 34, cz + 26],
-            [cx + 8, base + 35, cz + 28],
-            WOOD,
-        );
-        self.install_door(crate::doors::Door::prefab([cx - 8, base + 2, cz + 26]));
-    }
-    fn tree(&mut self, x: i32, z: i32, seed: i32) {
-        let base = terrain_height(x, z);
-        let height = 65 + (hash(x, z, seed) % 14) as i32;
-        self.cuboid([x - 2, base, z - 2], [x + 2, base + height, z + 2], WOOD);
-        for y in base + height - 28..=base + height + 27 {
-            for dz in -28..=28 {
-                for dx in -28..=28 {
-                    let shape = (dx * dx + dz * dz) as f32 / 720.0
-                        + ((y - base - height) as f32 / 28.0).powi(2);
-                    let contour = 0.92
-                        + (hash(
-                            (x + dx).div_euclid(5),
-                            y.div_euclid(5),
-                            (z + dz).div_euclid(5),
-                        ) % 100) as f32
-                            * 0.0016;
-                    if shape < contour {
-                        self.set(x + dx, y, z + dz, LEAF);
-                    }
-                }
-            }
-        }
-    }
 }
+
 pub fn hash(x: i32, y: i32, z: i32) -> u32 {
     let mut v = (x as u32).wrapping_mul(374761393)
         ^ (y as u32).wrapping_mul(668265263)

@@ -23,6 +23,7 @@ pub struct OverlayStats<'a> {
     pub time: &'a str,
     pub lighting_pending: bool,
     pub meshes_pending: bool,
+    pub terrain_full: bool,
 }
 pub fn vertices(
     camera: &Camera,
@@ -40,7 +41,15 @@ pub fn vertices(
     hud.styled_text("MiniCraft", 24.0, 24.0, 16.0, [0.94, 0.95, 0.93, 0.8], true);
     if let Some(preview) = stats.noise_preview {
         hud.text(
-            &format!("Noise preview / Seed {}", preview.seed),
+            &format!(
+                "{} / Seed {}",
+                if preview.infinite {
+                    "World"
+                } else {
+                    "Noise preview"
+                },
+                preview.seed
+            ),
             24.0,
             46.0,
             11.0,
@@ -102,6 +111,15 @@ pub fn vertices(
     }
     if stats.lighting_pending {
         hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
+    }
+    if stats.terrain_full {
+        hud.text(
+            "Terrain cache full",
+            layout.width - 144.0,
+            104.0,
+            12.0,
+            MUTED,
+        );
     }
     if stats.meshes_pending {
         hud.text(

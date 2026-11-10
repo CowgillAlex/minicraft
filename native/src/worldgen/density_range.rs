@@ -64,6 +64,9 @@ impl Sampler<'_> {
                     high: f64::NEG_INFINITY,
                 };
                 for corner in 0..8 {
+                    if (0..3).any(|axis| min[axis] == max[axis] && corner & (1 << axis) != 0) {
+                        continue;
+                    }
                     let p = std::array::from_fn(|axis| {
                         if corner & (1 << axis) == 0 {
                             min[axis]

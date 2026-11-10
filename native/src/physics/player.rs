@@ -69,8 +69,8 @@ impl Player {
         Self::new(World::meters(100, 26, 347) + Vec3::Y * 0.00002)
     }
     pub fn safe_spawn(world: &World) -> Self {
-        let mut player = Self::spawn();
-        if world.noise_preview.is_some() {
+        let mut player = world.spawn.map(Self::new).unwrap_or_else(Self::spawn);
+        if world.noise_preview.is_some() && world.spawn.is_none() {
             let [x, _, z] = crate::ray::grid_position(player.position)
                 .floor()
                 .as_ivec3()
@@ -86,6 +86,9 @@ impl Player {
             }
         }
         for _ in 0..=world.height() {
+            if !Self::body_ready(world, player.position) {
+                return player;
+            }
             if Self::can_occupy(world, player.position) {
                 return player;
             }
@@ -102,10 +105,39 @@ impl Player {
     pub fn bounds(&self) -> Aabb {
         Self::bounds_at(self.position)
     }
+    pub fn body_ready(world: &World, position: Vec3) -> bool {
+        if !world.infinite {
+            return true;
+        }
+        let body = Self::bounds_at(position);
+        let min = crate::ray::grid_position(body.min + Vec3::splat(0.0001))
+            .floor()
+            .as_ivec3()
+            .to_array();
+        let max = crate::ray::grid_position(body.max - Vec3::splat(0.0001))
+            .floor()
+            .as_ivec3()
+            .to_array();
+        for y in min[1].max(0).div_euclid(32)..=max[1].min(world.height() - 1).div_euclid(32) {
+            for z in min[2].div_euclid(32)..=max[2].div_euclid(32) {
+                for x in min[0].div_euclid(32)..=max[0].div_euclid(32) {
+                    if world.page([x, y, z]).is_none() {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
     pub fn can_occupy(world: &World, position: Vec3) -> bool {
         !collision::overlaps_solid(world, Self::bounds_at(position))
     }
     pub fn tick(&mut self, world: &World, input: Input) {
+        if self.mode != Mode::Spectator && !Self::body_ready(world, self.position) {
+            self.velocity = Vec3::ZERO;
+            self.grounded = false;
+            return;
+        }
         let dt = TICK_SECONDS as f32;
         let boost = if input.sprint {
             if self.mode != Mode::Walk {

@@ -108,9 +108,7 @@ impl Mesh {
             batches: Vec::new(),
             transparent_batches: Vec::new(),
         };
-        if world.chunk_exists(chunk[0] as usize, chunk[1] as usize, chunk[2] as usize)
-            && !world.buried_chunk(chunk)
-        {
+        if world.has_geometry(chunk) && !world.buried_chunk(chunk) {
             mesh.chunk(world, chunk.map(|v| v * CHUNK as i32));
         }
         mesh
@@ -144,6 +142,24 @@ impl Mesh {
     }
     fn chunk(&mut self, world: &World, origin: [i32; 3]) {
         let n = CHUNK as i32;
+        let side = CHUNK + 2;
+        let mut halo = vec![AIR; side.pow(3)];
+        let mut reader = world.reader();
+        for y in 0..side {
+            for z in 0..side {
+                for x in 0..side {
+                    halo[x + side * (z + side * y)] = reader.get_static([
+                        origin[0] + x as i32 - 1,
+                        origin[1] + y as i32 - 1,
+                        origin[2] + z as i32 - 1,
+                    ]);
+                }
+            }
+        }
+        let get = |p: [i32; 3]| {
+            let local = std::array::from_fn::<_, 3, _>(|i| (p[i] - origin[i] + 1) as usize);
+            halo[local[0] + side * (local[2] + side * local[1])]
+        };
         for axis in 0..3 {
             let u = (axis + 1) % 3;
             let v = (axis + 2) % 3;
@@ -156,13 +172,13 @@ impl Mesh {
                             p[axis] += slice;
                             p[u] += i;
                             p[v] += j;
-                            let material = world.get_static(p[0], p[1], p[2]);
+                            let material = get(p);
                             if material == AIR {
                                 continue;
                             }
                             let mut neighbor = p;
                             neighbor[axis] += sign;
-                            let other = world.get_static(neighbor[0], neighbor[1], neighbor[2]);
+                            let other = get(neighbor);
                             if (material == WATER && other != AIR && other != world::GLASS)
                                 || (material == world::GLASS && other != AIR && other != WATER)
                                 || (material != world::GLASS
@@ -180,7 +196,7 @@ impl Mesh {
                                         let mut q = neighbor;
                                         q[u] += du;
                                         q[v] += dv;
-                                        let m = world.get_static(q[0], q[1], q[2]);
+                                        let m = get(q);
                                         world::opaque(m) && m != WATER
                                     };
                                     let s1 = sample(*a, 0);

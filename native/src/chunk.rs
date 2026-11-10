@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum Chunk {
     Uniform(u8),
-    Dense(Arc<[u8]>),
+    Dense { cells: Arc<[u8]>, occupied: usize },
 }
 
 impl Chunk {
@@ -14,14 +14,17 @@ impl Chunk {
         if cells.iter().all(|v| *v == material) {
             Self::Uniform(material)
         } else {
-            Self::Dense(Arc::from(cells))
+            Self::Dense {
+                occupied: cells.iter().filter(|v| **v != AIR).count(),
+                cells: Arc::from(cells),
+            }
         }
     }
     #[inline]
     pub fn get(&self, index: usize) -> u8 {
         match self {
             Self::Uniform(material) => *material,
-            Self::Dense(cells) => cells[index],
+            Self::Dense { cells, .. } => cells[index],
         }
     }
     pub fn set(&mut self, index: usize, material: u8) {
@@ -29,9 +32,14 @@ impl Chunk {
             if *previous == material {
                 return;
             }
-            *self = Self::Dense(Arc::from(vec![*previous; CHUNK.pow(3)]));
+            *self = Self::Dense {
+                cells: Arc::from(vec![*previous; CHUNK.pow(3)]),
+                occupied: if *previous == AIR { 0 } else { CHUNK.pow(3) },
+            };
         }
-        if let Self::Dense(cells) = self {
+        if let Self::Dense { cells, occupied } = self {
+            *occupied += usize::from(cells[index] == AIR && material != AIR);
+            *occupied -= usize::from(cells[index] != AIR && material == AIR);
             Arc::make_mut(cells)[index] = material;
         }
     }
@@ -39,14 +47,14 @@ impl Chunk {
         match self {
             Self::Uniform(AIR) => 0,
             Self::Uniform(_) => CHUNK.pow(3),
-            Self::Dense(cells) => cells.iter().filter(|v| **v != AIR).count(),
+            Self::Dense { occupied, .. } => *occupied,
         }
     }
     #[cfg(test)]
     pub fn to_vec(&self) -> Vec<u8> {
         match self {
             Self::Uniform(material) => vec![*material; CHUNK.pow(3)],
-            Self::Dense(cells) => cells.to_vec(),
+            Self::Dense { cells, .. } => cells.to_vec(),
         }
     }
 }

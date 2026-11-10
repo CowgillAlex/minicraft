@@ -69,6 +69,7 @@ pub struct Renderer {
     shadow_ready: bool,
     stream_shadows_dirty: bool,
     shadow_updated: Instant,
+    shadow_matrix: Option<glam::Mat4>,
     started: Instant,
     pub visible_chunks: usize,
     pub visible_triangles: usize,
@@ -110,11 +111,12 @@ impl Renderer {
             crate::startup::Stage::Mesh,
             crate::world::NX * world.chunks_y() * crate::world::NZ,
         );
-        let scene = SceneMesh::new_with_progress(&device, world, progress)?;
+        let mut scene = SceneMesh::new_with_progress(&device, world, progress)?;
         println!("World meshed in {:.2}s", start.elapsed().as_secs_f32());
         progress.check()?;
         progress.begin(crate::startup::Stage::Lighting, 0);
         let lighting = LightVolume::new(&device, &queue, &scene.world);
+        scene.setup_terrain(&device, &queue, &lighting.layout);
         progress.check()?;
         progress.begin(crate::startup::Stage::Preparing, 0);
         let selection = device.create_buffer(&wgpu::BufferDescriptor {
@@ -259,6 +261,7 @@ impl Renderer {
             shadow_ready: false,
             stream_shadows_dirty: false,
             shadow_updated: Instant::now(),
+            shadow_matrix: None,
             started: Instant::now(),
             visible_chunks: 0,
             visible_triangles: 0,
@@ -275,6 +278,18 @@ impl Renderer {
     pub fn target_cell(&self, camera: &Camera, place: bool) -> Option<[i32; 3]> {
         let target = picking::cast(&self.scene.world, &self.door_meshes, camera)?;
         let hit = target.hit(&self.scene.world);
+        if self.scene.world.infinite {
+            let cell = if place { hit.adjacent? } else { hit.cell };
+            return (self.scene.world.contains(cell)
+                && self.scene.world.is_loaded(cell)
+                && (!place
+                    || crate::ray::grid_position(camera.position)
+                        .floor()
+                        .as_ivec3()
+                        .to_array()
+                        != cell))
+                .then_some(cell);
+        }
         editing::edit_cell(hit, camera.position, place, self.scene.world.height())
     }
     pub fn edit(&mut self, camera: &Camera, place: bool) -> bool {
@@ -291,6 +306,7 @@ impl Renderer {
         };
         self.shadow_ready = false;
         self.door_notice = None;
+        self.scene.stream_edits(&changes);
         self.lighting.request(&self.scene.world, changes);
         true
     }
@@ -311,10 +327,13 @@ impl Renderer {
     pub fn finish_meshes(&mut self, camera: &Camera) -> Result<()> {
         let start = Instant::now();
         loop {
-            if self
-                .scene
-                .update_stream(&self.device, camera.position, self.view.cache_radius())
-            {
+            if self.scene.update_stream(
+                &self.device,
+                &self.queue,
+                &self.lighting.layout,
+                camera.position,
+                self.view.cache_radius(),
+            ) {
                 self.shadow_ready = false;
             }
             if !self.scene.meshes_pending() {
@@ -336,10 +355,13 @@ impl Renderer {
             self.shadow_ready = false;
         }
         self.lighting.poll(&self.queue);
-        if self
-            .scene
-            .update_stream(&self.device, camera.position, self.view.cache_radius())
-        {
+        if self.scene.update_stream(
+            &self.device,
+            &self.queue,
+            &self.lighting.layout,
+            camera.position,
+            self.view.cache_radius(),
+        ) {
             self.stream_shadows_dirty = true;
         }
         // Mesh arrivals are spread across frames; avoid rebuilding the 4096² map for each batch.
@@ -360,7 +382,12 @@ impl Renderer {
             .resize(&self.device, &targets.depth, (width, height));
         let matrix = camera.matrix(width as f32 / height as f32);
         let (sun, power, color, daylight) = self.daylight.parameters();
-        let light_matrix = if self.scene.world.height() > crate::world::HEIGHT {
+        let light_matrix = if self.scene.world.infinite {
+            let focus = (camera.position / 8.0).floor() * 8.0;
+            let radius = self.view.distance() + 16.0;
+            glam::Mat4::orthographic_rh(-radius, radius, -radius, radius, 0.1, radius * 2.0 + 160.0)
+                * glam::Mat4::look_at_rh(focus + sun * (radius + 80.0), focus, glam::Vec3::Y)
+        } else if self.scene.world.height() > crate::world::HEIGHT {
             let top = self.scene.world.max_occupied_y as f32 * crate::world::VOXEL;
             let focus = glam::Vec3::Y * (top / 2.0);
             let radius = glam::Vec3::new(20.0, top / 2.0, 20.0).length() + 4.0;
@@ -369,6 +396,10 @@ impl Renderer {
         } else {
             Daylight::light_matrix(sun)
         };
+        if self.shadow_matrix != Some(light_matrix) {
+            self.shadow_ready = false;
+            self.shadow_matrix = Some(light_matrix);
+        }
         self.queue.write_buffer(
             &self.uniform,
             0,
@@ -475,6 +506,13 @@ impl Renderer {
             (self.visible_chunks, self.visible_triangles) =
                 self.scene.draw(&mut pass, Some(&frustum));
             for door in &self.door_meshes {
+                pass.set_bind_group(
+                    2,
+                    self.scene
+                        .light_at(door.center())
+                        .unwrap_or(&self.lighting.group),
+                    &[],
+                );
                 let triangles = door.draw(&mut pass, Some(&frustum), false);
                 if triangles > 0 {
                     self.visible_chunks += 1;
@@ -518,6 +556,13 @@ impl Renderer {
             self.visible_chunks += chunks;
             self.visible_triangles += triangles;
             for door in &self.door_meshes {
+                pass.set_bind_group(
+                    2,
+                    self.scene
+                        .light_at(door.center())
+                        .unwrap_or(&self.lighting.group),
+                    &[],
+                );
                 let triangles = door.draw(&mut pass, Some(&frustum), true);
                 if triangles > 0 {
                     self.visible_chunks += 1;
@@ -606,6 +651,7 @@ impl Renderer {
                 time: &time,
                 lighting_pending: self.lighting.pending(),
                 meshes_pending: self.scene.meshes_pending(),
+                terrain_full: self.scene.terrain_full(),
             },
             &self.ui,
         );
@@ -632,3 +678,11 @@ mod door_validation;
 #[cfg(test)]
 #[path = "view_tests.rs"]
 mod view_tests;
+
+#[cfg(test)]
+#[path = "sky_tests.rs"]
+mod sky_tests;
+
+#[cfg(test)]
+#[path = "infinite_render_tests.rs"]
+mod infinite_render_tests;

@@ -111,6 +111,9 @@ impl DoorGpu {
         self.transparent_count = mesh.transparent_indices.len() as u32;
         self.revision = door.revision;
     }
+    pub fn center(&self) -> Vec3 {
+        self.center
+    }
     pub fn angle(&self, now: Instant) -> f32 {
         let t = (now.duration_since(self.since).as_secs_f32() / 0.2).clamp(0.0, 1.0);
         self.start + (self.target - self.start) * t * t * (3.0 - 2.0 * t)

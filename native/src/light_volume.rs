@@ -24,7 +24,11 @@ pub struct LightVolume {
 impl LightVolume {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, world: &World) -> Self {
         let start = std::time::Instant::now();
-        let mut field = LightField::build(world);
+        let mut field = if world.infinite {
+            LightField::dummy()
+        } else {
+            LightField::build(world)
+        };
         println!("Light field baked in {:.2}s", start.elapsed().as_secs_f32());
         let size = field.size();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -57,6 +61,16 @@ impl LightVolume {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -65,48 +79,49 @@ impl LightVolume {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let view = texture.create_view(&Default::default());
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("light field"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let group = make_group(
+            device,
+            &layout,
+            &texture,
+            &sampler,
+            [-19.96875, 0.03125, -19.96875],
+            size.map(|v| v as f32 * 0.25),
+            world.infinite,
+        );
         let (tx, rx) = mpsc::channel::<LightJob>();
         let (result_tx, results) = mpsc::channel();
-        let worker = thread::spawn(move || {
-            while let Ok(mut job) = rx.recv() {
-                while let Ok(newer) = rx.try_recv() {
-                    job.edits.extend(newer.edits);
-                    job.world = newer.world;
-                    job.revision = newer.revision;
+        let worker = if world.infinite {
+            None
+        } else {
+            Some(thread::spawn(move || {
+                while let Ok(mut job) = rx.recv() {
+                    while let Ok(newer) = rx.try_recv() {
+                        job.edits.extend(newer.edits);
+                        job.world = newer.world;
+                        job.revision = newer.revision;
+                    }
+                    let patch = field.update(&job.world, &job.edits);
+                    if result_tx.send((job.revision, patch)).is_err() {
+                        break;
+                    }
                 }
-                let patch = field.update(&job.world, &job.edits);
-                if result_tx.send((job.revision, patch)).is_err() {
-                    break;
-                }
-            }
-        });
+            }))
+        };
         Self {
             layout,
             group,
             texture,
-            jobs: Some(tx),
+            jobs: (!world.infinite).then_some(tx),
             results,
-            worker: Some(worker),
+            worker,
             revision: 0,
             applied: 0,
         }
     }
     pub fn request(&mut self, world: &World, cells: Vec<[i32; 3]>) {
+        if world.infinite {
+            return;
+        }
         self.revision += 1;
         if let Some(jobs) = &self.jobs {
             let _ = jobs.send(LightJob {
@@ -192,4 +207,95 @@ fn upload(
             depth_or_array_layers: size[2] as u32,
         },
     );
+}
+
+pub struct RegionLight {
+    pub group: wgpu::BindGroup,
+}
+impl RegionLight {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        origin: [i32; 3],
+        pixels: &[u8],
+    ) -> Self {
+        let size = [34; 3];
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("streamed regional light"),
+            size: extent(size),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rg8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        upload(queue, &texture, [0; 3], size, pixels);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("regional light filter"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let position =
+            World::meters(origin[0] - 4, origin[1] - 4, origin[2] - 4) + glam::Vec3::splat(0.03125);
+        Self {
+            group: make_group(
+                device,
+                layout,
+                &texture,
+                &sampler,
+                position.to_array(),
+                [8.5; 3],
+                true,
+            ),
+        }
+    }
+}
+fn make_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    texture: &wgpu::Texture,
+    sampler: &wgpu::Sampler,
+    origin: [f32; 3],
+    size: [f32; 3],
+    infinite: bool,
+) -> wgpu::BindGroup {
+    use wgpu::util::DeviceExt;
+    let params = [
+        origin[0],
+        origin[1],
+        origin[2],
+        f32::from(u8::from(infinite)),
+        size[0],
+        size[1],
+        size[2],
+        0.0,
+    ];
+    let transform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("light region transform"),
+        contents: bytemuck::cast_slice(&params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("light region"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(
+                    &texture.create_view(&Default::default()),
+                ),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: transform.as_entire_binding(),
+            },
+        ],
+    })
 }

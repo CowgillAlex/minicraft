@@ -25,11 +25,52 @@ fn obstacles(world: &World, body: Aabb, movement: Vec3, stepping: bool) -> Vec<A
         .floor()
         .as_ivec3();
     let mut boxes = Vec::new();
-    for y in min.y.max(0)..=max.y.min(world.height() - 1) {
-        for z in min.z.max(0)..=max.z.min(world::DEPTH - 1) {
-            for x in min.x.max(0)..=max.x.min(world::WIDTH - 1) {
-                if solid(world.get(x, y, z)) {
-                    boxes.push(Aabb::voxel([x, y, z]));
+    let lo = [
+        if world.infinite { min.x } else { min.x.max(0) },
+        min.y.max(0),
+        if world.infinite { min.z } else { min.z.max(0) },
+    ];
+    let hi = [
+        if world.infinite {
+            max.x
+        } else {
+            max.x.min(world::WIDTH - 1)
+        },
+        max.y.min(world.height() - 1),
+        if world.infinite {
+            max.z
+        } else {
+            max.z.min(world::DEPTH - 1)
+        },
+    ];
+    for cy in lo[1].div_euclid(32)..=hi[1].div_euclid(32) {
+        for cz in lo[2].div_euclid(32)..=hi[2].div_euclid(32) {
+            for cx in lo[0].div_euclid(32)..=hi[0].div_euclid(32) {
+                let key = [cx, cy, cz];
+                let page = world.page(key);
+                if (world.infinite && page.is_none())
+                    || matches!(page,Some(crate::chunk::Chunk::Uniform(m)) if solid(*m))
+                {
+                    let min = World::meters(cx * 32, cy * 32, cz * 32);
+                    boxes.push(Aabb {
+                        min,
+                        max: min + Vec3::splat(2.0),
+                    });
+                    continue;
+                }
+                if (page.is_none() || matches!(page, Some(crate::chunk::Chunk::Uniform(_))))
+                    && !world.has_overlay(key)
+                {
+                    continue;
+                }
+                for y in lo[1].max(cy * 32)..=hi[1].min(cy * 32 + 31) {
+                    for z in lo[2].max(cz * 32)..=hi[2].min(cz * 32 + 31) {
+                        for x in lo[0].max(cx * 32)..=hi[0].min(cx * 32 + 31) {
+                            if solid(world.get(x, y, z)) {
+                                boxes.push(Aabb::voxel([x, y, z]));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -37,7 +78,7 @@ fn obstacles(world: &World, body: Aabb, movement: Vec3, stepping: bool) -> Vec<A
     // The finite world has solid horizontal boundaries and a floor, but no flight ceiling.
     let half_x = world::WIDTH as f32 * VOXEL / 2.0;
     let half_z = world::DEPTH as f32 * VOXEL / 2.0;
-    for (min, max) in [
+    let boundaries = [
         (
             Vec3::new(-10000.0, -10000.0, -10000.0),
             Vec3::new(-half_x, 10000.0, 10000.0),
@@ -49,8 +90,19 @@ fn obstacles(world: &World, body: Aabb, movement: Vec3, stepping: bool) -> Vec<A
         ),
         (Vec3::new(-10000.0, -10000.0, half_z), Vec3::splat(10000.0)),
         (Vec3::splat(-10000.0), Vec3::new(10000.0, 0.0, 10000.0)),
-    ] {
-        boxes.push(Aabb { min, max });
+    ];
+    for (i, (min, max)) in boundaries.into_iter().enumerate() {
+        if world.infinite && i < 4 {
+            continue;
+        }
+        if world.infinite {
+            boxes.push(Aabb {
+                min: Vec3::new(swept.min.x - 1.0, -10000.0, swept.min.z - 1.0),
+                max: Vec3::new(swept.max.x + 1.0, 0.0, swept.max.z + 1.0),
+            });
+        } else {
+            boxes.push(Aabb { min, max });
+        }
     }
     boxes
 }

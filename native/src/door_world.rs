@@ -26,10 +26,13 @@ impl World {
         let Some((chunk, index)) = self.address(cell[0], cell[1], cell[2]) else {
             return;
         };
-        if material == AIR && self.door_chunks[chunk].is_none() {
+        if material == AIR && !self.door_chunks.contains_key(&chunk) {
             return;
         }
-        let data = self.door_chunks[chunk].get_or_insert_with(|| Arc::from(vec![0; CHUNK.pow(3)]));
+        let data = self
+            .door_chunks
+            .entry(chunk)
+            .or_insert_with(|| Arc::from(vec![0; CHUNK.pow(3)]));
         let data = Arc::make_mut(data);
         let old = data[index];
         self.voxels += usize::from(old == AIR && material != AIR);
@@ -62,9 +65,7 @@ impl World {
         cells
     }
     pub fn edit(&mut self, cell: [i32; 3], material: u8) -> Option<Edit> {
-        if !crate::editing::in_bounds(cell, self.height())
-            || self.get(cell[0], cell[1], cell[2]) == material
-        {
+        if !self.contains(cell) || self.get(cell[0], cell[1], cell[2]) == material {
             return None;
         }
         if let Some((id, local)) = self
@@ -116,7 +117,7 @@ impl World {
         if next.blocked_by(player)
             || next.blocked_by(rendered_player)
             || next.occupied().any(|(p, _)| {
-                !crate::editing::in_bounds(p, self.height())
+                !self.contains(p)
                     || self.get_static(p[0], p[1], p[2]) != AIR
                     || self.door_at(p).is_some_and(|(other, _)| other != id)
             })

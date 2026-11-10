@@ -18,6 +18,7 @@ pub struct Preview {
     pub origin: [i32; 3],
     pub height_m: i32,
     pub reference: bool,
+    pub infinite: bool,
 }
 
 impl Default for Preview {
@@ -27,6 +28,7 @@ impl Default for Preview {
             origin: [120, -64, -20],
             height_m: 384,
             reference: false,
+            infinite: true,
         }
     }
 }
@@ -63,6 +65,9 @@ impl Scene {
                 if preview.height_m != 384 {
                     preview.origin[1] = 58;
                 }
+                preview.infinite = !args
+                    .iter()
+                    .any(|arg| matches!(arg.as_str(), "--finite" | "--worldgen-benchmark"));
                 preview.reference = args.iter().any(|v| v == "--reference-worldgen");
                 if let Some(seed) = value("--seed")? {
                     preview.seed = seed
@@ -117,6 +122,9 @@ impl Preview {
 
     pub fn build_with_progress(self, progress: &crate::startup::Progress) -> Result<World, String> {
         progress.check()?;
+        if self.infinite {
+            return crate::terrain_region::initial(self, progress);
+        }
         progress.begin(
             crate::startup::Stage::Terrain,
             world::NX * self.height_m as usize / 2 * world::NZ,

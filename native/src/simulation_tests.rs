@@ -147,3 +147,44 @@ fn spectator_cannot_exit_inside_terrain_and_ignores_world_boundaries() {
     assert!(sim.player.position.x > 25.0);
     assert_eq!(sim.player.position.y, -4.0);
 }
+
+#[test]
+fn resetting_to_an_unloaded_spawn_waits_for_data_without_falling_or_moving_the_spawn() {
+    use crate::{chunk::Chunk, world};
+    let mut world = World::with_height(384 * 16);
+    world.infinite = true;
+    let spawn = World::meters(-10, 32, 320);
+    world.spawn = Some(spawn);
+    let mut sim = Simulation::default();
+    sim.reset(&world);
+    assert_eq!(sim.player.position, spawn);
+    sim.advance(
+        &world,
+        Input {
+            direction: Vec3::X,
+            speed: 5.0,
+            ..Default::default()
+        },
+        1.0,
+    );
+    assert_eq!(sim.player.position, spawn);
+    for x in -1..=0 {
+        for z in 9..=10 {
+            for y in 0..=2 {
+                world.insert_page(
+                    [x, y, z],
+                    Chunk::Uniform(if y == 0 { world::STONE } else { world::AIR }),
+                );
+            }
+        }
+    }
+    sim.advance(
+        &world,
+        Input {
+            speed: 5.0,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert!((sim.player.position.y - spawn.y).abs() < 0.001);
+}

@@ -28,6 +28,8 @@ mod scene_mesh;
 mod simulation;
 mod startup;
 mod startup_ui;
+mod terrain_region;
+mod terrain_stream;
 mod title;
 mod ui;
 mod ui_icons;

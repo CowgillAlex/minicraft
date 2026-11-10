@@ -207,3 +207,54 @@ fn jump_clears_one_metre_and_returns_to_ground() {
     assert!(player.grounded);
     assert!((player.position.y - start).abs() < 0.00001);
 }
+
+#[test]
+fn infinite_walking_crosses_the_old_edge_and_waits_for_unloaded_collision_data() {
+    use crate::{
+        chunk::Chunk,
+        physics::{collision, Aabb, Input, Player},
+        world::{World, AIR, STONE},
+    };
+    use glam::Vec3;
+    let mut world = World::with_height(192);
+    world.infinite = true;
+    for x in 20..=26 {
+        for z in 9..=11 {
+            for y in 0..=3 {
+                world.insert_page([x, y, z], Chunk::Uniform(if y == 0 { STONE } else { AIR }));
+            }
+        }
+    }
+    let mut player = Player::new(World::meters(664, 32, 320));
+    for _ in 0..10 {
+        player.tick(
+            &world,
+            Input {
+                direction: Vec3::X,
+                speed: 5.0,
+                ..Default::default()
+            },
+        );
+    }
+    assert!(player.position.x > 23.0);
+    let body = Player::bounds_at(World::meters(856, 32, 320));
+    let motion = collision::move_body(&world, body, Vec3::new(4.0, 0.0, 0.0), true);
+    assert!(motion.delta.x >= 0.0 && motion.delta.x <= 0.201);
+    assert!(!Player::can_occupy(&world, World::meters(-100, 64, -100)));
+    let mut waiting = Player::new(World::meters(-100, 64, -100));
+    let before = waiting.position;
+    waiting.tick(
+        &world,
+        Input {
+            direction: Vec3::X,
+            speed: 5.0,
+            ..Default::default()
+        },
+    );
+    assert_eq!(waiting.position, before);
+    assert!(Aabb::voxel([672, 32, 320]).max.x > 20.0);
+    let body = Player::bounds_at(Vec3::new(12000.0, 0.5, -12000.0));
+    let motion = collision::move_body(&world, body, -Vec3::Y, false);
+    assert!((motion.delta.y + 0.5).abs() < 0.00003);
+    assert!(motion.grounded);
+}

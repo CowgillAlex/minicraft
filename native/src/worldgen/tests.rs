@@ -200,3 +200,114 @@ fn prepared_fields_match_the_java_density_reference() {
         }
     }
 }
+
+#[test]
+fn infinite_pages_preserve_signed_coordinates_and_session_edits_after_unload() {
+    use crate::{
+        chunk::Chunk,
+        world::{World, AIR, LIGHT, STONE},
+    };
+    let mut world = World::with_height(384 * 16);
+    world.infinite = true;
+    let key = [-1, 3, -2];
+    world.insert_page(key, Chunk::Uniform(STONE));
+    let old = world.clone();
+    world.set(-1, 100, -33, AIR);
+    world.set(-2, 100, -33, LIGHT);
+    assert_eq!(old.get(-1, 100, -33), STONE);
+    assert_eq!(world.get(-1, 100, -33), AIR);
+    world.unload(key);
+    assert!(!world.is_loaded([-1, 100, -33]));
+    world.insert_page(key, Chunk::Uniform(STONE));
+    assert_eq!(world.get(-1, 100, -33), AIR);
+    assert_eq!(world.get(-2, 100, -33), LIGHT);
+    assert_eq!(world.voxels, 32_usize.pow(3) - 1);
+    world.set(672, 100, 900, STONE);
+    assert_eq!(world.get(672, 100, 900), STONE);
+}
+
+#[test]
+fn infinite_pages_match_reference_on_both_sides_of_the_old_window() {
+    for seed in [1, -12345] {
+        let generator = Generator::new(seed).unwrap();
+        let mut optimized = generator.sampler();
+        let mut reference = generator.sampler();
+        let preview = preview::Preview {
+            seed,
+            ..Default::default()
+        };
+        for origin in [[-32, 2000, 0], [640, 2000, -32], [672, 1000, 640]] {
+            let page = super::page::generate(preview, &mut optimized, origin);
+            let expected = super::page::reference(preview, &mut reference, origin);
+            for (i, expected) in expected.into_iter().enumerate() {
+                assert_eq!(page.data.get(i), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
+    use crate::{
+        terrain_region::{self, center},
+        terrain_stream::Stream,
+        world::World,
+        worldgen::sky::Sky,
+    };
+    use std::{collections::HashMap, time::Duration};
+    let mut world = World::with_height(384 * 16);
+    world.infinite = true;
+    world.noise_preview = Some(Default::default());
+    let mut stream = Stream::new(
+        world,
+        Sky::default(),
+        center([5, 47, 0]),
+        0.0,
+        HashMap::new(),
+    );
+    for expected in [[5, 47, 0], [-7, 47, 13]] {
+        if expected[0] < 0 {
+            stream.request(center(expected), 0.0, HashMap::new(), None);
+        }
+        let region = stream
+            .results
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .unwrap();
+        stream.received();
+        let crate::terrain_stream::Update::Region(region) = region else {
+            panic!("unexpected cache eviction")
+        };
+        assert_eq!(region.key, expected);
+        assert!(!region.pages.is_empty());
+        assert!(region
+            .pages
+            .iter()
+            .all(|(key, _)| terrain_region::page_region(*key) == expected));
+    }
+    let target = [-7 * 128 + 64, 47 * 128 + 64, 13 * 128 + 64];
+    let mut edited = World::with_height(384 * 16);
+    edited.infinite = true;
+    edited.noise_preview = Some(Default::default());
+    edited.set(target[0], target[1], target[2], crate::world::LIGHT);
+    stream.request(
+        center([-7, 47, 13]),
+        0.0,
+        HashMap::new(),
+        Some((&edited, &[target])),
+    );
+    let region = stream
+        .results
+        .recv_timeout(Duration::from_secs(30))
+        .unwrap()
+        .unwrap();
+    stream.received();
+    let crate::terrain_stream::Update::Region(region) = region else {
+        panic!("unexpected cache eviction")
+    };
+    assert_eq!(region.revision, 1);
+    let light = region
+        .light
+        .expect("placed lamps require a regional light texture");
+    assert!(light.as_chunks::<2>().0.iter().any(|p| p[0] > 100));
+}

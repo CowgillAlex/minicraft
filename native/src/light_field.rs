@@ -30,6 +30,7 @@ pub struct LightPatch {
 struct Grid {
     size: [usize; 3],
     strides: [usize; 3],
+    origin: [i32; 3],
 }
 impl Grid {
     fn new(height: i32) -> Self {
@@ -38,10 +39,21 @@ impl Grid {
             (height / STEP) as usize,
             (world::DEPTH / STEP) as usize,
         ];
+        Self::region([0; 3], size)
+    }
+    fn region(origin: [i32; 3], size: [usize; 3]) -> Self {
         Self {
+            origin,
             size,
             strides: [1, size[0], size[0] * size[1]],
         }
+    }
+    fn center(self, p: [usize; 3]) -> Vec3 {
+        World::meters(
+            self.origin[0] + p[0] as i32 * STEP + STEP / 2,
+            self.origin[1] + p[1] as i32 * STEP + STEP / 2,
+            self.origin[2] + p[2] as i32 * STEP + STEP / 2,
+        ) + Vec3::splat(VOXEL * 0.5)
     }
     fn index(self, x: usize, y: usize, z: usize) -> usize {
         x + self.size[0] * (y + self.size[1] * z)
@@ -61,14 +73,7 @@ impl Grid {
         }
     }
 }
-fn center(x: usize, y: usize, z: usize) -> Vec3 {
-    World::meters(
-        x as i32 * STEP + STEP / 2,
-        y as i32 * STEP + STEP / 2,
-        z as i32 * STEP + STEP / 2,
-    ) + Vec3::splat(VOXEL * 0.5)
-}
-fn loss(material: u8) -> u8 {
+pub(crate) fn loss(material: u8) -> u8 {
     match material {
         world::AIR | world::LIGHT => 0,
         world::GLASS => 3,
@@ -79,8 +84,9 @@ fn loss(material: u8) -> u8 {
 pub fn segment_loss(world: &World, from: Vec3, to: Vec3) -> u8 {
     let direction = to - from;
     let mut total = 0_u8;
+    let mut reader = world.reader();
     for (cell, _) in VoxelRay::new(from, direction, direction.length()) {
-        let attenuation = loss(world.get(cell[0], cell[1], cell[2]));
+        let attenuation = loss(reader.get(cell));
         if attenuation == BLOCKED {
             return BLOCKED;
         }
@@ -89,11 +95,20 @@ pub fn segment_loss(world: &World, from: Vec3, to: Vec3) -> u8 {
     total
 }
 /// Neighbor connections are axis aligned; integer traversal visits the same fine voxels.
-fn edge_loss(world: &World, p: [usize; 3], axis: usize) -> u8 {
-    let mut cell = p.map(|v| v as i32 * STEP + STEP / 2);
+fn edge_loss(world: &World, grid: Grid, p: [usize; 3], axis: usize) -> u8 {
+    edge_loss_read(&mut world.reader(), grid, p, axis)
+}
+fn edge_loss_read(
+    reader: &mut crate::world::Reader<'_>,
+    grid: Grid,
+    p: [usize; 3],
+    axis: usize,
+) -> u8 {
+    let mut cell =
+        std::array::from_fn::<_, 3, _>(|i| grid.origin[i] + p[i] as i32 * STEP + STEP / 2);
     let mut total = 0_u8;
     for _ in 0..=STEP {
-        let attenuation = loss(world.get(cell[0], cell[1], cell[2]));
+        let attenuation = loss(reader.get(cell));
         if attenuation == BLOCKED {
             return BLOCKED;
         }
@@ -106,8 +121,9 @@ fn sky_column(world: &World, x: usize, z: usize) -> Vec<u8> {
     let grid = Grid::new(world.height());
     let mut seeds = vec![0; grid.size[1]];
     let mut value = 255_u8;
+    let mut reader = world.reader();
     for y in (0..world.height()).rev() {
-        let material = world.get(x as i32 * STEP + STEP / 2, y, z as i32 * STEP + STEP / 2);
+        let material = reader.get([x as i32 * STEP + STEP / 2, y, z as i32 * STEP + STEP / 2]);
         if loss(material) == BLOCKED || material == world::LIGHT {
             break;
         }
@@ -118,11 +134,10 @@ fn sky_column(world: &World, x: usize, z: usize) -> Vec<u8> {
     }
     seeds
 }
-fn emitter_seeds(world: &World, cell: [i32; 3], mut visit: impl FnMut(usize, u8)) {
-    let grid = Grid::new(world.height());
+fn emitter_seeds(world: &World, grid: Grid, cell: [i32; 3], mut visit: impl FnMut(usize, u8)) {
     let [x, y, z] = cell;
     let source = World::meters(x, y, z) + Vec3::splat(VOXEL * 0.5);
-    let base = cell.map(|v| v / STEP);
+    let base = std::array::from_fn::<_, 3, _>(|i| (cell[i] - grid.origin[i]).div_euclid(STEP));
     for dz in -1..=1 {
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -134,7 +149,7 @@ fn emitter_seeds(world: &World, cell: [i32; 3], mut visit: impl FnMut(usize, u8)
                     continue;
                 }
                 let p = p.map(|v| v as usize);
-                let target = center(p[0], p[1], p[2]);
+                let target = grid.center(p);
                 let cost = segment_loss(world, source, target);
                 if cost == BLOCKED {
                     continue;
@@ -154,8 +169,70 @@ impl LightField {
     }
     pub fn build(world: &World) -> Self {
         let grid = Grid::new(world.height());
+        Self::build_grid(world, grid, false, |x, z| sky_column(world, x, z))
+    }
+    pub fn dummy() -> Self {
+        Self {
+            grid: Grid::region([0; 3], [1; 3]),
+            pixels: vec![0; 2],
+            edges: vec![[BLOCKED; 6]],
+            seeds: vec![[0; 2]],
+        }
+    }
+    pub fn build_region(
+        world: &World,
+        origin: [i32; 3],
+        size: [usize; 3],
+        mut sky: impl FnMut([i32; 2]) -> Vec<u8>,
+    ) -> Self {
+        let grid = Grid::region(origin, size);
+        Self::build_grid(world, grid, true, |x, z| {
+            sky([
+                origin[0] + x as i32 * STEP + STEP / 2,
+                origin[2] + z as i32 * STEP + STEP / 2,
+            ])
+        })
+    }
+    pub fn crop(&self, origin: [usize; 3], size: [usize; 3]) -> Vec<u8> {
+        let mut pixels = Vec::with_capacity(size.iter().product::<usize>() * 2);
+        for z in origin[2]..origin[2] + size[2] {
+            for y in origin[1]..origin[1] + size[1] {
+                let i = self.grid.index(origin[0], y, z) * 2;
+                pixels.extend_from_slice(&self.pixels[i..i + size[0] * 2]);
+            }
+        }
+        pixels
+    }
+    fn build_grid(
+        world: &World,
+        grid: Grid,
+        quick: bool,
+        mut sky: impl FnMut(usize, usize) -> Vec<u8>,
+    ) -> Self {
         let count = grid.size.iter().product::<usize>();
+        let mut seeds = vec![[0; 2]; count];
+        for z in 0..grid.size[2] {
+            for x in 0..grid.size[0] {
+                for (y, value) in sky(x, z).into_iter().enumerate() {
+                    seeds[grid.index(x, y, z)][1] = value;
+                }
+            }
+        }
+        for &cell in &world.emitters {
+            emitter_seeds(world, grid, cell, |i, value| {
+                seeds[i][0] = seeds[i][0].max(value)
+            });
+        }
+        if quick && (seeds.iter().all(|s| *s == [0, 0]) || seeds.iter().all(|s| *s == [0, 255])) {
+            return Self {
+                grid,
+                pixels: seeds.iter().flatten().copied().collect(),
+                edges: Vec::new(),
+                seeds: Vec::new(),
+            };
+        }
         let mut edges = vec![[BLOCKED; 6]; count];
+        let mut reader = world.reader();
         for z in 0..grid.size[2] {
             for y in 0..grid.size[1] {
                 for x in 0..grid.size[0] {
@@ -163,24 +240,13 @@ impl LightField {
                     let i = grid.index(x, y, z);
                     for axis in 0..3 {
                         if p[axis] + 1 < grid.size[axis] {
-                            let cost = edge_loss(world, p, axis);
+                            let cost = edge_loss_read(&mut reader, grid, p, axis);
                             edges[i][axis * 2 + 1] = cost;
                             edges[i + grid.strides[axis]][axis * 2] = cost;
                         }
                     }
                 }
             }
-        }
-        let mut seeds = vec![[0; 2]; count];
-        for z in 0..grid.size[2] {
-            for x in 0..grid.size[0] {
-                for (y, value) in sky_column(world, x, z).into_iter().enumerate() {
-                    seeds[grid.index(x, y, z)][1] = value;
-                }
-            }
-        }
-        for &cell in &world.emitters {
-            emitter_seeds(world, cell, |i, value| seeds[i][0] = seeds[i][0].max(value));
         }
         let pixels = seeds.iter().flatten().copied().collect();
         let mut field = Self {

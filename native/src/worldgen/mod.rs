@@ -3,9 +3,10 @@ mod config;
 mod density;
 mod fast_density;
 mod noise;
-mod page;
+pub(crate) mod page;
 pub mod preview;
 mod random;
+pub(crate) mod sky;
 #[cfg(test)]
 mod tests;
 

@@ -218,11 +218,11 @@ fn axis_connections_preserve_fine_voxel_transmission() {
         let mut next = p;
         next[axis] += 1;
         assert_eq!(
-            edge_loss(&world, p, axis),
+            edge_loss(&world, Grid::new(world.height()), p, axis),
             segment_loss(
                 &world,
-                center(p[0], p[1], p[2]),
-                center(next[0], next[1], next[2])
+                Grid::new(world.height()).center(p),
+                Grid::new(world.height()).center(next)
             )
         );
     }
@@ -282,4 +282,60 @@ fn lighting_and_incremental_uploads_follow_the_actual_world_height() {
     world.set(320, 230, 320, world::AIR);
     check_update(&world, &mut field, &mut displayed, &[[320, 230, 320]]);
     assert_eq!(field.at([320, 234, 320])[0], 0);
+}
+
+#[test]
+fn regional_light_bricks_match_a_full_bake_across_their_shared_edge() {
+    let mut world = World::with_height(256);
+    for x in 128..640 {
+        for z in 128..640 {
+            world.set(x, 0, z, world::STONE);
+        }
+    }
+    world.set(300, 32, 320, world::LIGHT);
+    for y in 1..64 {
+        for z in 288..352 {
+            world.set(320, y, z, if y < 32 { world::GLASS } else { world::STONE });
+        }
+    }
+    let full = LightField::build(&world);
+    for origin in [[256, 0, 256], [384, 0, 256]] {
+        let low = origin.map(|v| v - 128);
+        let region = LightField::build_region(&world, low, [96; 3], |[x, z]| {
+            let column = sky_column(&world, (x / 4) as usize, (z / 4) as usize);
+            (0..96)
+                .map(|y| {
+                    let fine = low[1] + y * 4 + 2;
+                    if fine < 0 {
+                        0
+                    } else if fine >= world.height() {
+                        255
+                    } else {
+                        column[fine as usize / 4]
+                    }
+                })
+                .collect()
+        });
+        for y in 0..32 {
+            for z in 0..32 {
+                for x in 0..32 {
+                    let a = region.grid.index(x + 32, y + 32, z + 32) * 2;
+                    let b =
+                        full.grid
+                            .index(origin[0] as usize / 4 + x, y, origin[2] as usize / 4 + z)
+                            * 2;
+                    assert_eq!(
+                        &region.pixels[a..a + 2],
+                        &full.pixels[b..b + 2],
+                        "at {:?}",
+                        [
+                            origin[0] + x as i32 * 4,
+                            y as i32 * 4,
+                            origin[2] + z as i32 * 4
+                        ]
+                    );
+                }
+            }
+        }
+    }
 }

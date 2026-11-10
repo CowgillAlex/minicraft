@@ -34,7 +34,7 @@ impl LightField {
                     if p[axis] + 1 >= grid.size[axis] {
                         continue;
                     }
-                    let cost = edge_loss(world, p, axis);
+                    let cost = edge_loss(world, grid, p, axis);
                     if cost != self.edges[i][axis * 2 + 1] {
                         let next = i + grid.strides[axis];
                         self.edges[i][axis * 2 + 1] = cost;
@@ -97,7 +97,7 @@ impl LightField {
             if (0..3).any(|axis| base[axis] + 1 < min[axis] || base[axis] > max[axis] + 1) {
                 continue;
             }
-            emitter_seeds(world, cell, |i, value| {
+            emitter_seeds(world, grid, cell, |i, value| {
                 if targets.contains(&i) {
                     self.seeds[i][0] = self.seeds[i][0].max(value);
                 }

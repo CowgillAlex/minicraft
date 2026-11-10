@@ -34,11 +34,7 @@ pub fn recognize(world: &World, handle: [i32; 3]) -> Option<Door> {
                         for xx in 0..SIZE[0] {
                             let p = [xx, yy, z];
                             let cell = candidate.closed_cell(p);
-                            if !(0..world::WIDTH).contains(&cell[0])
-                                || !(0..world.height()).contains(&cell[1])
-                                || !(0..world::DEPTH).contains(&cell[2])
-                                || world.door_at(cell).is_some()
-                            {
+                            if !world.contains(cell) || world.door_at(cell).is_some() {
                                 frame = false;
                             }
                             cells[index(p)] = world.get_static(cell[0], cell[1], cell[2]);

@@ -7,6 +7,8 @@ use crate::{
 use glam::Vec3;
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
+#[path = "scene_terrain.rs"]
+mod terrain;
 struct GpuChunk {
     vertices: wgpu::Buffer,
     indices: Option<wgpu::Buffer>,
@@ -26,6 +28,7 @@ pub struct SceneMesh {
     transparent_batches: Vec<Batch>,
     replacements: HashMap<[i32; 3], Option<GpuChunk>>,
     stream: Option<crate::mesh_stream::Stream>,
+    terrain: Option<terrain::Terrain>,
 }
 impl SceneMesh {
     #[cfg(test)]
@@ -38,6 +41,9 @@ impl SceneMesh {
         world: World,
         progress: &crate::startup::Progress,
     ) -> Result<Self, String> {
+        if world.infinite {
+            return Self::infinite(device, world, progress);
+        }
         if world.height() > crate::world::HEIGHT {
             let position = crate::physics::Player::safe_spawn(&world).position
                 + Vec3::Y * crate::physics::EYE_HEIGHT;
@@ -108,6 +114,7 @@ impl SceneMesh {
                 transparent_batches: Vec::new(),
                 replacements,
                 stream: Some(crate::mesh_stream::Stream::new(position, keys, radius)),
+                terrain: None,
             });
         }
         let mut mesh = Mesh::build_with_progress(&world, progress)?;
@@ -140,6 +147,7 @@ impl SceneMesh {
             transparent_batches: mesh.transparent_batches,
             replacements: HashMap::new(),
             stream: None,
+            terrain: None,
         })
     }
     pub fn edit(
@@ -152,7 +160,7 @@ impl SceneMesh {
         let chunks: std::collections::HashSet<_> = edit
             .terrain
             .iter()
-            .flat_map(|&p| editing::affected_chunks(p, self.world.height()))
+            .flat_map(|&p| editing::affected_world_chunks(&self.world, p))
             .collect();
         for chunk in chunks {
             let mesh = Mesh::build_chunk(&self.world, chunk);
@@ -171,7 +179,19 @@ impl SceneMesh {
         }
         Some(edit.light)
     }
-    pub fn update_stream(&mut self, device: &wgpu::Device, position: Vec3, radius: f32) -> bool {
+    pub fn update_stream(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        position: Vec3,
+        radius: f32,
+    ) -> bool {
+        if let Some(mut terrain) = self.terrain.take() {
+            let changed = terrain.update(self, device, queue, layout, position, radius);
+            self.terrain = Some(terrain);
+            return changed;
+        }
         let Some(stream) = &mut self.stream else {
             return false;
         };
@@ -207,12 +227,13 @@ impl SceneMesh {
         changed
     }
     pub fn meshes_pending(&self) -> bool {
-        self.stream.as_ref().is_some_and(|stream| {
-            stream
-                .desired
-                .iter()
-                .any(|key| !self.replacements.contains_key(key))
-        })
+        self.terrain.as_ref().is_some_and(|t| t.pending())
+            || self.stream.as_ref().is_some_and(|stream| {
+                stream
+                    .desired
+                    .iter()
+                    .any(|key| !self.replacements.contains_key(key))
+            })
     }
     pub fn draw<'a>(
         &'a self,
@@ -238,7 +259,9 @@ impl SceneMesh {
             stats.0 += 1;
             stats.1 += batch.indices.len() / 3;
         }
-        let chunks: Vec<_> = if let Some(stream) = &self.stream {
+        let chunks: Vec<_> = if let Some(terrain) = &self.terrain {
+            terrain.chunks(self)
+        } else if let Some(stream) = &self.stream {
             stream
                 .order
                 .iter()
@@ -252,6 +275,11 @@ impl SceneMesh {
                 continue;
             }
             if let Some(indices) = &chunk.indices {
+                if frustum.is_some() {
+                    if let Some(light) = self.light_at(chunk.center) {
+                        pass.set_bind_group(2, light, &[]);
+                    }
+                }
                 pass.set_vertex_buffer(0, chunk.vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..chunk.count, 0, 0..1);
@@ -298,7 +326,10 @@ impl SceneMesh {
         });
         let mut triangles = 0;
         let count = draws.len();
-        for (vertices, indices, range, _) in draws {
+        for (vertices, indices, range, center) in draws {
+            if let Some(light) = self.light_at(center) {
+                pass.set_bind_group(2, light, &[]);
+            }
             triangles += range.len() / 3;
             pass.set_vertex_buffer(0, vertices.slice(..));
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);

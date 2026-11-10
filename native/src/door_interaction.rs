@@ -36,6 +36,7 @@ impl Renderer {
             DoorAction::Changed => {
                 self.door_notice = None;
                 self.shadow_ready = false;
+                self.scene.stream_edits(&cells);
                 self.lighting.request(&self.scene.world, cells);
                 None
             }

@@ -12,6 +12,7 @@ pub struct Simulation {
     jump_pending: bool,
     pub ticks: u64,
     before_spectator: Mode,
+    spawn_pending: bool,
 }
 impl Default for Simulation {
     fn default() -> Self {
@@ -27,6 +28,7 @@ impl Simulation {
             jump_pending: false,
             ticks: 0,
             before_spectator: Mode::Walk,
+            spawn_pending: false,
         }
     }
     pub fn queue_jump(&mut self) {
@@ -36,6 +38,15 @@ impl Simulation {
         self.jump_pending = false;
     }
     pub fn advance(&mut self, world: &World, input: Input, seconds: f64) {
+        if self.spawn_pending {
+            if !Player::body_ready(world, self.player.position) {
+                return;
+            }
+            self.reset(world);
+            if self.spawn_pending {
+                return;
+            }
+        }
         // Limit catch-up after a stall without slowing normal 10/30/60/144 Hz rendering.
         self.accumulator += seconds.clamp(0.0, 0.25);
         while self.accumulator + 1e-10 >= TICK_SECONDS {
@@ -91,6 +102,7 @@ impl Simulation {
             self.before_spectator = self.player.mode;
             self.player.mode = Mode::Spectator;
         }
+        self.spawn_pending = false;
         self.player.position = position;
         self.previous = position;
         self.accumulator = 0.0;
@@ -101,6 +113,7 @@ impl Simulation {
     }
     pub fn reset(&mut self, world: &World) {
         *self = Self::new(Player::safe_spawn(world));
+        self.spawn_pending = !Player::body_ready(world, self.player.position);
     }
 }
 #[cfg(test)]

@@ -14,10 +14,12 @@ struct Uniforms {
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
 @group(2) @binding(0) var light_volume: texture_3d<f32>;
 @group(2) @binding(1) var light_sampler: sampler;
+struct LightRegion {origin:vec4<f32>,size:vec4<f32>};
+@group(2) @binding(2) var<uniform> light_region:LightRegion;
 fn lighting_at(world: vec3<f32>,normal: vec3<f32>) -> vec2<f32> {
     let position = world + normal * 0.14;
-    let uv = (position + vec3(20.0,0.0,20.0) - vec3(0.03125))/(vec3<f32>(textureDimensions(light_volume))*0.25);
-    if any(uv<vec3(0.0)) || any(uv>vec3(1.0)) { return vec2(0.0,1.0); }
+    let uv=(position-light_region.origin.xyz)/light_region.size.xyz;
+    if any(uv<vec3(0.0)) || any(uv>vec3(1.0)) { return vec2(0.0,select(1.0,0.0,light_region.origin.w>0.5)); }
     return textureSampleLevel(light_volume,light_sampler,uv,0.0).rg;
 }
 fn tonemap(color: vec3<f32>) -> vec3<f32> {
@@ -63,6 +65,14 @@ fn sky_color(direction: vec3<f32>) -> vec3<f32> {
     var color=mix(horizon,zenith,pow(altitude,0.5));
     let light_dot=max(dot(direction,scene.sun.xyz),0.0);
     color+=scene.light_color.rgb*pow(light_dot,40.0)*scene.sun.w*0.18;
+    return color;
+}
+// Celestial discs and stars belong only to the depth-tested sky pass.
+fn visible_sky(direction:vec3<f32>) -> vec3<f32> {
+    var color=sky_color(direction);
+    let altitude=max(direction.y,0.0);
+    let day=scene.daylight.x;
+    let light_dot=max(dot(direction,scene.sun.xyz),0.0);
     color+=scene.light_color.rgb*smoothstep(0.99955,0.9998,light_dot)*mix(0.3,6.0,day);
     let star_cell=floor(direction*1200.0);
     let star=fract(sin(dot(star_cell,vec3(127.1,311.7,74.7)))*43758.5453);
@@ -93,7 +103,7 @@ fn shadow_visibility(world: vec3<f32>, normal: vec3<f32>) -> f32 {
 
 }
 // Full-height worlds keep only nearby fine meshes resident. Fog covers the cache edge.
-fn streamed_world() -> bool { return textureDimensions(light_volume).y > 48u; }
+fn streamed_world() -> bool { return light_region.origin.w>0.5 || textureDimensions(light_volume).y > 48u; }
 fn terrain_fog(distance:f32) -> f32 {
     if scene.view.w<0.5 { return 0.0; }
     let haze=min(1.0-exp(-distance*distance*0.00012*scene.view.z),0.92);
@@ -159,7 +169,7 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     let world = scene.inverse_view_proj * vec4(v.clip, 1.0, 1.0);
     let direction = normalize(world.xyz / world.w - scene.camera.xyz);
     var out: SurfaceOut;
-    out.color = vec4(sky_color(direction),1.0);
+    out.color = vec4(visible_sky(direction),1.0);
     out.normal = vec4(0.5,0.5,0.5,0.0);
     return out;
 }

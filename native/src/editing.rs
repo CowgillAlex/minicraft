@@ -68,6 +68,23 @@ pub fn edit_cell(hit: Hit, camera: Vec3, place: bool, height: i32) -> Option<[i3
     Some(cell)
 }
 
+pub fn affected_world_chunks(world: &World, cell: [i32; 3]) -> Vec<[i32; 3]> {
+    if !world.infinite {
+        return affected_chunks(cell, world.height());
+    }
+    let mut keys = HashSet::new();
+    for x in -1..=1 {
+        for y in -1..=1 {
+            for z in -1..=1 {
+                let p = (IVec3::from_array(cell) + IVec3::new(x, y, z)).to_array();
+                if world.contains(p) {
+                    keys.insert(p.map(|v| v.div_euclid(CHUNK as i32)));
+                }
+            }
+        }
+    }
+    keys.into_iter().collect()
+}
 /// Faces and corner AO can depend on neighboring chunks, including diagonal ones.
 pub fn affected_chunks(cell: [i32; 3], height: i32) -> Vec<[i32; 3]> {
     let mut chunks = HashSet::new();

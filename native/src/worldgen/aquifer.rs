@@ -165,6 +165,15 @@ impl Aquifer {
 
     // Cache only the current 12 candidates locally; repeated fine samples use no map lookups.
     fn prepare_neighbors(&mut self, anchor: [i32; 3]) {
+        if self.locations.len() > 65536
+            || self.statuses.len() > 65536
+            || self.surfaces.len() > 65536
+        {
+            self.locations.clear();
+            self.statuses.clear();
+            self.surfaces.clear();
+            self.anchor = None;
+        }
         if self.anchor == Some(anchor) {
             return;
         }
