@@ -12,6 +12,7 @@ pub fn shadow_view(name: &str) -> Result<Camera> {
             let base=crate::world::terrain_height(155,205)+2;
             (crate::world::World::meters(180,base+20,223),crate::world::World::meters(148,base+18,223))
         }
+        "cave" => (Vec3::new(-14.0, 16.7, 17.0), Vec3::new(-4.0, 14.0, 10.0)),
         "house" => (Vec3::new(2.0, 4.3, 12.2), Vec3::new(1.75, 3.7, 7.8)),
         "terrain" => (Vec3::new(-7.6, 2.1, 10.5), Vec3::new(-7.6, 1.1, 9.2)),
         "leaves" => (Vec3::new(-9.8, 5.0, 12.7), Vec3::new(-10.5, 5.1, 10.6)),
@@ -33,7 +34,7 @@ pub fn shadow_view(name: &str) -> Result<Camera> {
         }
         _ => {
             return Err(
-                "--view must be door, door-side, house, terrain, leaves, water, street, interior or window".into(),
+                "--view must be cave, door, door-side, house, terrain, leaves, water, street, interior or window".into(),
             )
         }
     };

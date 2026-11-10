@@ -2,6 +2,7 @@ use crate::renderer::Result;
 use std::sync::Arc;
 
 /// One device shared by the loading screen and background renderer initialization.
+#[derive(Clone)]
 pub struct Gpu {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,

@@ -15,7 +15,7 @@ struct GpuChunk {
     transparent_count: u32,
     center: Vec3,
 }
-/// Static shared buffers plus small replacement buffers for edited chunks.
+/// Nearby streamed buffers, or shared buffers for small scenes with replacements after edits.
 pub struct SceneMesh {
     pub world: World,
     vertices: wgpu::Buffer,
@@ -73,7 +73,8 @@ impl SceneMesh {
                     if progress.check().is_err() {
                         break;
                     }
-                    bytes += mesh.vertices.len() * std::mem::size_of::<crate::mesh::Vertex>()
+                    bytes += mesh.vertices.len()
+                        * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
                         + (mesh.indices.len() + mesh.transparent_indices.len()) * 4;
                     replacements.insert(key, gpu_chunk(device, key, &mesh));
                     progress.advance();
@@ -123,7 +124,7 @@ impl SceneMesh {
             vertices: buffer(
                 device,
                 "world vertices",
-                bytemuck::cast_slice(&mesh.vertices),
+                bytemuck::cast_slice(&crate::gpu_vertex::pack(&mesh.vertices)),
                 wgpu::BufferUsages::VERTEX,
             ),
             indices: buffer(
@@ -195,7 +196,8 @@ impl SceneMesh {
             if !stream.accepts(&result) {
                 continue;
             }
-            bytes += result.mesh.vertices.len() * std::mem::size_of::<crate::mesh::Vertex>()
+            bytes += result.mesh.vertices.len()
+                * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
                 + (result.mesh.indices.len() + result.mesh.transparent_indices.len()) * 4;
             self.replacements
                 .insert(result.key, gpu_chunk(device, result.key, &result.mesh));
@@ -337,7 +339,7 @@ fn gpu_chunk(device: &wgpu::Device, key: [i32; 3], mesh: &Mesh) -> Option<GpuChu
         vertices: buffer(
             device,
             "chunk vertices",
-            bytemuck::cast_slice(&mesh.vertices),
+            bytemuck::cast_slice(&crate::gpu_vertex::pack(&mesh.vertices)),
             wgpu::BufferUsages::VERTEX,
         ),
         indices: optional_indices(device, &mesh.indices),

@@ -1,4 +1,4 @@
-use crate::mesh::Vertex;
+use crate::gpu_vertex::GpuVertex;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub struct Pipelines {
     pub transparent_pipeline: wgpu::RenderPipeline,
@@ -32,9 +32,10 @@ impl Pipelines {
                 bind_group_layouts: &[uniform_layout],
                 push_constant_ranges: &[],
             });
-        let attributes = wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x3,3=>Float32x4,5=>Float32x2,4=>Float32];
+        let attributes =
+            wgpu::vertex_attr_array![0=>Float32x3,1=>Snorm8x4,2=>Unorm8x4,3=>Unorm8x4,5=>Unorm16x2];
         let vertex_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as u64,
+            array_stride: std::mem::size_of::<GpuVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attributes,
         };

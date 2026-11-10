@@ -12,6 +12,8 @@ pub struct CaptureOptions<'a> {
     pub door: Option<&'a str>,
     pub closeup: bool,
     pub ao_enabled: bool,
+    pub night_vision: bool,
+    pub transparency: bool,
     pub view: Option<&'a str>,
     pub hours: Option<f32>,
 }
@@ -26,6 +28,8 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         door,
         closeup,
         ao_enabled,
+        night_vision,
+        transparency,
         view: shadow_view,
         hours,
     } = options;
@@ -68,6 +72,8 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     });
     let view = texture.create_view(&Default::default());
     renderer.ao_enabled = ao_enabled;
+    renderer.night_vision = night_vision;
+    renderer.transparency_enabled = transparency;
     if let Some(hours) = hours {
         if !hours.is_finite() {
             return Err("--time must be finite".into());
@@ -203,6 +209,18 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     renderer.finish_doors();
     renderer.finish_meshes(&camera)?;
     renderer.finish_lighting();
+    // Warm the pipelines and shadow cache before measuring steady frames.
+    renderer.render(
+        &view,
+        &camera,
+        FrameInfo {
+            size: (width, height),
+            fps: 0.0,
+            captured,
+            vsync: false,
+        },
+    );
+    renderer.device.poll(wgpu::Maintain::Wait);
     let start = Instant::now();
     for _ in 0..frames {
         renderer.render(

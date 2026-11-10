@@ -92,7 +92,7 @@ impl DoorGpu {
         self.vertices = buffer(
             device,
             "editable door vertices",
-            bytemuck::cast_slice(&self.source),
+            bytemuck::cast_slice(&crate::gpu_vertex::pack(&self.source)),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         self.opaque = buffer(
@@ -142,7 +142,11 @@ impl DoorGpu {
             out.normal = (rotation * Vec3::from_array(source.normal)).to_array();
         }
         if !self.transformed.is_empty() {
-            queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&self.transformed));
+            queue.write_buffer(
+                &self.vertices,
+                0,
+                bytemuck::cast_slice(&crate::gpu_vertex::pack(&self.transformed)),
+            );
         }
         self.center = door.point(Vec3::new(8.0, 16.0, 2.0) * VOXEL, angle);
         self.last_angle = angle;

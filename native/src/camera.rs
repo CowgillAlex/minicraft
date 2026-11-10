@@ -35,12 +35,15 @@ impl Camera {
         self.pitch = (self.pitch - dy as f32 * 0.002).clamp(-1.54, 1.54);
     }
 }
-pub struct Frustum([Vec4; 6]);
+pub struct Frustum {
+    planes: [Vec4; 6],
+    distance: Option<(Vec3, f32)>,
+}
 impl Frustum {
     pub fn new(matrix: Mat4) -> Self {
         let rows = matrix.transpose().to_cols_array_2d().map(Vec4::from_array);
-        Self(
-            [
+        Self {
+            planes: [
                 rows[3] + rows[0],
                 rows[3] - rows[0],
                 rows[3] + rows[1],
@@ -49,10 +52,20 @@ impl Frustum {
                 rows[3] - rows[2],
             ]
             .map(|plane| plane / plane.truncate().length()),
-        )
+            distance: None,
+        }
+    }
+    pub fn within_distance(mut self, position: Vec3, distance: f32) -> Self {
+        self.distance = Some((position, distance));
+        self
     }
     pub fn contains_sphere(&self, center: Vec3, radius: f32) -> bool {
-        self.0
+        if self.distance.is_some_and(|(position, distance)| {
+            position.distance_squared(center) > (distance + radius).powi(2)
+        }) {
+            return false;
+        }
+        self.planes
             .iter()
             .all(|plane| plane.truncate().dot(center) + plane.w >= -radius)
     }
@@ -66,5 +79,13 @@ mod tests {
         assert!(f.contains_sphere(Vec3::new(0.0, 0.0, -3.0), 0.2));
         assert!(!f.contains_sphere(Vec3::new(0.0, 0.0, 3.0), 0.2));
         assert!(!f.contains_sphere(Vec3::new(100.0, 0.0, -3.0), 0.2));
+    }
+    #[test]
+    fn fog_culling_keeps_geometry_crossing_the_visible_distance() {
+        let f = Frustum::new(Mat4::perspective_rh(1.0, 1.0, 0.1, 512.0))
+            .within_distance(Vec3::ZERO, 24.0);
+        assert!(f.contains_sphere(Vec3::new(0.0, 0.0, -24.5), 1.0));
+        assert!(!f.contains_sphere(Vec3::new(0.0, 0.0, -26.0), 1.0));
+        assert!(f.contains_sphere(Vec3::new(0.0, 0.0, -10.0), 1.0));
     }
 }

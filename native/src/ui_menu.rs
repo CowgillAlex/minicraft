@@ -46,7 +46,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("Mouse", "Look around"),
                 ("Space / Shift", "Jump / slow walk"),
                 ("F / Space / Shift", "Toggle flight / up / down"),
-                ("F5", "Toggle spectator / phase through"),
+                ("F5 / F6", "Spectator / night vision"),
                 ("Ctrl / Scroll", "Boost / adjust speed"),
                 ("Left / Right click", "Break / place a voxel"),
                 ("Middle click", "Pick material"),
@@ -72,7 +72,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                     "Sun and moon follow your computer's clock."
                 },
                 p.x + 26.0,
-                p.y + 294.0,
+                p.y + 348.0,
                 12.0,
                 MUTED,
             );
@@ -80,7 +80,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             hud.centered(
                 &format!("Time of day   {}", stats.time),
                 p.x + p.w / 2.0,
-                p.y + 324.0,
+                p.y + 378.0,
                 14.0,
                 TEXT,
                 false,
@@ -104,7 +104,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
         hud.rounded_rect(b.rect, 8.0, bg);
         let fg = if b.primary {
             [0.035, 0.075, 0.045, 1.0]
-        } else if b.action == Action::Quit {
+        } else if b.action == Action::Title {
             MUTED
         } else {
             TEXT
@@ -113,6 +113,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             Action::AmbientOcclusion => Some(stats.ao_enabled),
             Action::Vsync => Some(vsync),
             Action::Grid => Some(stats.grid),
+            Action::NightVision => Some(stats.night_vision),
             Action::LocalTime => Some(stats.local_time),
             _ => None,
         };

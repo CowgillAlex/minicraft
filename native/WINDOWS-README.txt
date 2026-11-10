@@ -1,8 +1,10 @@
-MINICRAFT v0.8.0
+MINICRAFT v0.9.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.8.0-windows-x64.exe. No installer or extra asset files.
-The window opens before terrain generation. A dark loading screen shows
+Run minicraft-v0.9.0-windows-x64.exe. No installer or extra asset files.
+The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
+or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
+pastes it. Create world starts generation. A dark loading screen shows
 terrain/mesh page counts, lighting and graphics preparation, and elapsed time.
 Generation and GPU preparation run in the background. Resize, minimize or
 close the window normally; Escape cancels loading. The normal world menu
@@ -18,7 +20,10 @@ outlines, and time of day. Use local time follows the computer clock in
 its local timezone, including while menus are open. This option is off
 by default and lasts for the current session. Turning it off keeps the
 current time. The -/+ time buttons and -/= keys switch back to manual.
-F1 shows controls and F3 shows debug info.
+F1 shows controls and F3 shows debug info. Night vision is in Settings or
+on F6. It reveals dark caves without changing the clock or rebaking light.
+Title screen in the world menu lets you choose another seed. Creating a new
+world discards the current session, including edits.
 
 CONTROLS
 Play / Back to world / Enter: capture mouse
@@ -28,6 +33,7 @@ Space: jump (fly up in flight mode)
 Shift / Q: slow walk (fly down in flight mode)
 Ctrl: sprint / flight boost
 F: toggle walking / flight, both with collisions
+F6: toggle night vision
 F5: toggle spectator, pass through terrain without gravity
     Uses flight controls. Move into clear space inside the world to exit.
 E: open / close the targeted door
@@ -95,9 +101,12 @@ A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
 The default scene is a finite 40 x 384 x 40 metre noise preview containing
 only stone, water and air. It ports the Paper-Minecraft PR #1 density graph
 and aquifer rules. Terrain is sampled every 6.25 cm at its original scale.
-Seed 1, origin 120,-64,-20. The full -64 to 320 metre range is loaded.
+The title screen chooses the seed. The default origin is 120,-64,-20. The full -64 to 320 metre range is loaded.
 Uniform 2 metre pages use one material value; mixed pages retain fine voxels.
 Nearby meshes stream within 28 metres. Fog hides the cache boundary.
+Packed 28-byte GPU vertices reduce mesh bandwidth and memory. Fully fogged
+chunks are culled. Streaming shadow refreshes are limited to eight per second;
+voxel edits, doors and time changes still refresh shadows immediately.
 Horizontal infinite generation and persistent saves are not implemented.
 
 Optional launch arguments:

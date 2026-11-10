@@ -112,3 +112,42 @@ fn shallow_water_reveals_the_floor_and_depth_reduces_its_visibility() {
         "deeper water must attenuate the bottom"
     );
 }
+
+#[test]
+#[ignore = "requires a Vulkan/DirectX-capable GPU or software Vulkan adapter"]
+fn night_vision_reveals_a_sealed_dark_pond_without_changing_the_clock() {
+    let instance = wgpu::Instance::default();
+    let mut renderer = pollster::block_on(Renderer::new(
+        &instance,
+        None,
+        crate::worldgen::preview::Scene::Village,
+    ))
+    .unwrap();
+    let mut world = World::empty();
+    for x in 288..=352 {
+        for z in 288..=352 {
+            for y in 0..=64 {
+                if x == 288 || x == 352 || z == 288 || z == 352 || y == 0 || y == 64 {
+                    world.set(x, y, z, world::STONE);
+                } else if y <= 16 {
+                    world.set(x, y, z, world::WATER);
+                }
+            }
+        }
+    }
+    renderer.lighting = LightVolume::new(&renderer.device, &renderer.queue, &world);
+    renderer.scene = SceneMesh::new(&renderer.device, world);
+    renderer.shadow_ready = false;
+    renderer.hud_enabled = false;
+    renderer.daylight.hours = 3.0;
+    let camera = looking_at(Vec3::new(0.0, 2.5, 1.0), Vec3::new(0.0, 0.7, 0.0));
+    let dark = brightness(&pixels(&mut renderer, &camera));
+    renderer.night_vision = true;
+    let bright = brightness(&pixels(&mut renderer, &camera));
+    println!("Sealed pond brightness: normal {dark:.2}, night vision {bright:.2}");
+    assert!(bright > dark + 30.0);
+    assert_eq!(renderer.daylight.hours, 3.0);
+    assert!(!renderer.lighting.pending());
+    renderer.night_vision = false;
+    assert!((brightness(&pixels(&mut renderer, &camera)) - dark).abs() < 1.0);
+}

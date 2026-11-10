@@ -13,6 +13,7 @@ pub struct OverlayStats<'a> {
     pub triangles: usize,
     pub chunks: usize,
     pub ao_enabled: bool,
+    pub night_vision: bool,
     pub grid: bool,
     pub local_time: bool,
     pub interaction: Option<&'a str>,
@@ -94,6 +95,9 @@ pub fn vertices(
             13.0,
             [0.85, 0.89, 0.86, 0.8],
         );
+    }
+    if stats.night_vision {
+        hud.text("Night vision", 24.0, layout.height - 60.0, 12.0, ACCENT);
     }
     if stats.lighting_pending {
         hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);

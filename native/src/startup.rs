@@ -91,7 +91,7 @@ impl Progress {
 }
 
 pub enum Event {
-    Graphics(Box<LoadingScreen>),
+    Graphics(Box<LoadingScreen>, Gpu),
     Ready(Box<Renderer>),
     Failed(String),
 }
@@ -105,32 +105,40 @@ impl Startup {
     pub fn start(
         instance: Arc<wgpu::Instance>,
         surface: Arc<wgpu::Surface<'static>>,
-        source: Scene,
+    ) -> std::io::Result<Self> {
+        Self::spawn(move |work, sender| {
+            let gpu = pollster::block_on(Gpu::new(&instance, Some(&surface)))
+                .map_err(|e| e.to_string())?;
+            work.check()?;
+            let screen = LoadingScreen::new(&gpu).map_err(|e| e.to_string())?;
+            sender
+                .send(Event::Graphics(Box::new(screen), gpu))
+                .map_err(|_| "Window closed".to_string())
+        })
+    }
+    pub fn generate(gpu: Gpu, source: Scene, previous: Option<Renderer>) -> std::io::Result<Self> {
+        Self::spawn(move |work, sender| {
+            // Release old world data and lighting workers away from the window event loop.
+            drop(previous);
+            let renderer = Renderer::from_gpu(gpu, source, &work).map_err(|e| e.to_string())?;
+            work.check()?;
+            sender
+                .send(Event::Ready(Box::new(renderer)))
+                .map_err(|_| "Window closed".to_string())
+        })
+    }
+    fn spawn(
+        job: impl FnOnce(Progress, mpsc::Sender<Event>) -> Result<(), String> + Send + 'static,
     ) -> std::io::Result<Self> {
         let progress = Progress::default();
         let work = progress.clone();
         let (sender, events) = mpsc::channel();
-        // The worker owns all expensive initialization, including GPU pipelines/uploads.
-        // Closing the window cancels CPU work and never joins this thread on the UI path.
         std::thread::Builder::new()
             .name("world-startup".into())
             .spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                    || -> Result<(), String> {
-                        let gpu = pollster::block_on(Gpu::new(&instance, Some(&surface)))
-                            .map_err(|e| e.to_string())?;
-                        work.check()?;
-                        let screen = LoadingScreen::new(&gpu).map_err(|e| e.to_string())?;
-                        sender
-                            .send(Event::Graphics(Box::new(screen)))
-                            .map_err(|_| "Window closed")?;
-                        let renderer =
-                            Renderer::from_gpu(gpu, source, &work).map_err(|e| e.to_string())?;
-                        work.check()?;
-                        let _ = sender.send(Event::Ready(Box::new(renderer)));
-                        Ok(())
-                    },
-                ));
+                let failure = sender.clone();
+                let result =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(work, sender)));
                 let error = match result {
                     Ok(Ok(())) => None,
                     Ok(Err(error)) => Some(error),
@@ -143,7 +151,7 @@ impl Startup {
                     ),
                 };
                 if let Some(error) = error {
-                    let _ = sender.send(Event::Failed(error));
+                    let _ = failure.send(Event::Failed(error));
                 }
             })?;
         Ok(Self { progress, events })

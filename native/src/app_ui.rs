@@ -54,11 +54,11 @@ impl App {
             }
         }
     }
-    fn ui_action(&mut self, action: ui::Action, event_loop: &ActiveEventLoop) {
+    fn ui_action(&mut self, action: ui::Action) {
         use ui::{Action, Panel};
         match action {
             Action::Resume => self.capture_cursor(true),
-            Action::Quit => event_loop.exit(),
+            Action::Title => self.return_to_title(),
             Action::Vsync => {
                 self.vsync = !self.vsync;
                 if let Some(window) = &self.window {
@@ -73,6 +73,7 @@ impl App {
                         Action::Back => renderer.ui.panel = Panel::Pause,
                         Action::AmbientOcclusion => renderer.ao_enabled = !renderer.ao_enabled,
                         Action::Grid => renderer.grid = !renderer.grid,
+                        Action::NightVision => renderer.night_vision = !renderer.night_vision,
                         Action::LocalTime => renderer.toggle_local_time(),
                         Action::Earlier => renderer.adjust_time(-0.5),
                         Action::Later => renderer.adjust_time(0.5),
@@ -120,6 +121,11 @@ impl App {
                     }
                 }
             }
+            KeyCode::F6 => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.night_vision = !renderer.night_vision;
+                }
+            }
             KeyCode::F3 => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.ui.debug = !renderer.ui.debug;
@@ -135,6 +141,19 @@ impl App {
         true
     }
     pub(super) fn click_menu(&mut self, event_loop: &ActiveEventLoop) {
+        if let (Some(title), Some(window)) = (&mut self.title, &self.window) {
+            let size = window.inner_size();
+            match crate::title::action_at((size.width, size.height), title.pointer) {
+                Some(crate::title::Action::Seed) => {
+                    title.focused = true;
+                    title.selected = true;
+                }
+                Some(crate::title::Action::Create) => self.begin_world(event_loop),
+                Some(crate::title::Action::Quit) => event_loop.exit(),
+                None => title.focused = false,
+            }
+            return;
+        }
         let action =
             self.window
                 .as_ref()
@@ -145,10 +164,23 @@ impl App {
                         .action_at(renderer.ui.panel, renderer.ui.pointer)
                 });
         if let Some(action) = action {
-            self.ui_action(action, event_loop);
+            self.ui_action(action);
         }
     }
     pub(super) fn move_ui_cursor(&mut self, position: PhysicalPosition<f64>) {
+        self.pointer = [position.x as f32, position.y as f32];
+        if let (Some(window), Some(title)) = (&self.window, &mut self.title) {
+            title.pointer = [position.x as f32, position.y as f32];
+            let size = window.inner_size();
+            window.set_cursor(
+                match crate::title::action_at((size.width, size.height), title.pointer) {
+                    Some(crate::title::Action::Seed) => CursorIcon::Text,
+                    Some(_) => CursorIcon::Pointer,
+                    None => CursorIcon::Default,
+                },
+            );
+            return;
+        }
         if let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) {
             renderer.ui.pointer = [position.x as f32, position.y as f32];
             let size = window.inner_size();

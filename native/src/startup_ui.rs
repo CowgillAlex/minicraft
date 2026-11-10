@@ -40,9 +40,12 @@ impl LoadingScreen {
     }
 
     pub fn render(&self, view: &wgpu::TextureView, size: (u32, u32), progress: &Progress) {
-        let vertices = vertices(size, progress);
+        self.draw(view, &vertices(size, progress));
+    }
+
+    pub fn draw(&self, view: &wgpu::TextureView, vertices: &[HudVertex]) {
         self.queue
-            .write_buffer(&self.vertices, 0, bytemuck::cast_slice(&vertices));
+            .write_buffer(&self.vertices, 0, bytemuck::cast_slice(vertices));
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

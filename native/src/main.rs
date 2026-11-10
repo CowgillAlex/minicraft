@@ -11,6 +11,7 @@ mod door_gpu;
 mod doors;
 mod editing;
 mod gpu;
+mod gpu_vertex;
 mod hud;
 mod light_field;
 mod light_volume;
@@ -27,6 +28,7 @@ mod scene_mesh;
 mod simulation;
 mod startup;
 mod startup_ui;
+mod title;
 mod ui;
 mod ui_icons;
 mod ui_menu;
@@ -47,6 +49,8 @@ use winit::{
 
 struct App {
     scene: worldgen::preview::Scene,
+    title: Option<title::Title>,
+    gpu: Option<gpu::Gpu>,
     instance: Arc<wgpu::Instance>,
     window: Option<Arc<Window>>,
     surface: Option<Arc<wgpu::Surface<'static>>>,
@@ -57,6 +61,7 @@ struct App {
     camera: Camera,
     simulation: simulation::Simulation,
     keys: HashSet<KeyCode>,
+    pointer: [f32; 2],
     captured: bool,
     occluded: bool,
     vsync: bool,
@@ -67,9 +72,16 @@ struct App {
     error: Option<String>,
 }
 impl App {
-    fn new(scene: worldgen::preview::Scene) -> Self {
+    fn new(scene: worldgen::preview::Scene, explicit_seed: bool) -> Self {
         Self {
             scene,
+            title: match scene {
+                worldgen::preview::Scene::Noise(preview) => {
+                    Some(title::Title::new(explicit_seed.then_some(preview.seed)))
+                }
+                _ => None,
+            },
+            gpu: None,
             instance: Arc::new(wgpu::Instance::default()),
             window: None,
             surface: None,
@@ -80,6 +92,7 @@ impl App {
             camera: Camera::default(),
             simulation: simulation::Simulation::default(),
             keys: HashSet::new(),
+            pointer: [0.0; 2],
             captured: false,
             occluded: false,
             vsync: true,
@@ -92,7 +105,7 @@ impl App {
     }
     fn draw(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_startup(event_loop);
-        if self.renderer.is_none() {
+        if self.title.is_some() || self.renderer.is_none() {
             self.draw_loading(event_loop);
             return;
         }
@@ -164,7 +177,7 @@ impl ApplicationHandler for App {
     }
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
         if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. })
-            && self.startup.is_some()
+            && (self.startup.is_some() || self.title.is_some())
             && !self.occluded
         {
             if let Some(window) = &self.window {
@@ -229,15 +242,31 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
+                    if event.state == ElementState::Released {
+                        self.keys.remove(&key);
+                        return;
+                    }
+                    if self.title.is_some() {
+                        self.keys.insert(key);
+                        let control = self.keys.contains(&KeyCode::ControlLeft)
+                            || self.keys.contains(&KeyCode::ControlRight);
+                        let title = self.title.as_mut().unwrap();
+                        if control && key == KeyCode::KeyV && title.focused {
+                            if let Some(text) = crate::title::clipboard() {
+                                title.insert(&text);
+                            }
+                        } else if title.key(key, event.text.as_deref(), control)
+                            == Some(title::Action::Create)
+                        {
+                            self.begin_world(event_loop);
+                        }
+                        return;
+                    }
                     if let Some(startup) = &self.startup {
                         if key == KeyCode::Escape && event.state == ElementState::Pressed {
                             startup.progress.cancel();
                             event_loop.exit();
                         }
-                        return;
-                    }
-                    if event.state == ElementState::Released {
-                        self.keys.remove(&key);
                         return;
                     }
                     if self.captured {
@@ -364,7 +393,7 @@ impl ApplicationHandler for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_startup(event_loop);
-        if self.startup.is_some() {
+        if self.startup.is_some() || self.title.is_some() {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + std::time::Duration::from_millis(33),
             ));
@@ -481,6 +510,8 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
                     .map(String::as_str),
                 closeup: args.iter().any(|arg| arg == "--ao-closeup"),
                 ao_enabled: !args.iter().any(|arg| arg == "--no-ao"),
+                night_vision: args.iter().any(|arg| arg == "--night-vision"),
+                transparency: !args.iter().any(|arg| arg == "--no-transparency"),
                 view: args
                     .iter()
                     .position(|arg| arg == "--shadow-view" || arg == "--view")
@@ -492,7 +523,7 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
     }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new(scene);
+    let mut app = App::new(scene, args.iter().any(|arg| arg == "--seed"));
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {
         return Err(error.into());

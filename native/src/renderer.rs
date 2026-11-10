@@ -44,6 +44,8 @@ pub struct Renderer {
     occlusion: Occlusion,
     water: crate::water::WaterDepth,
     pub ao_enabled: bool,
+    pub night_vision: bool,
+    pub transparency_enabled: bool,
     shadow_debug: bool,
     uniform: wgpu::Buffer,
     uniform_group: wgpu::BindGroup,
@@ -63,6 +65,8 @@ pub struct Renderer {
     hud_count: u32,
 
     shadow_ready: bool,
+    stream_shadows_dirty: bool,
+    shadow_updated: Instant,
     started: Instant,
     pub visible_chunks: usize,
     pub visible_triangles: usize,
@@ -229,6 +233,8 @@ impl Renderer {
             occlusion,
             water,
             ao_enabled: true,
+            night_vision: false,
+            transparency_enabled: true,
             shadow_debug: false,
             uniform,
             uniform_group,
@@ -248,6 +254,8 @@ impl Renderer {
             hud_count: 0,
 
             shadow_ready: false,
+            stream_shadows_dirty: false,
+            shadow_updated: Instant::now(),
             started: Instant::now(),
             visible_chunks: 0,
             visible_triangles: 0,
@@ -323,6 +331,10 @@ impl Renderer {
         }
         self.lighting.poll(&self.queue);
         if self.scene.update_stream(&self.device, camera.position) {
+            self.stream_shadows_dirty = true;
+        }
+        // Mesh arrivals are spread across frames; avoid rebuilding the 4096² map for each batch.
+        if self.stream_shadows_dirty && self.shadow_updated.elapsed().as_millis() >= 125 {
             self.shadow_ready = false;
         }
         self.sync_doors();
@@ -358,7 +370,9 @@ impl Renderer {
                 camera: camera.position.extend(1.0).to_array(),
                 sun: sun.extend(power).to_array(),
                 daylight,
-                light_color: color.extend(0.0).to_array(),
+                light_color: color
+                    .extend(f32::from(u8::from(self.night_vision)))
+                    .to_array(),
                 options: [
                     self.started.elapsed().as_secs_f32(),
                     f32::from(u8::from(self.grid)),
@@ -367,7 +381,10 @@ impl Renderer {
                 ],
             }),
         );
-        let frustum = Frustum::new(matrix);
+        let mut frustum = Frustum::new(matrix);
+        if self.scene.world.height() > crate::world::HEIGHT {
+            frustum = frustum.within_distance(camera.position, 24.0);
+        }
         self.target = if captured {
             picking::cast(&self.scene.world, &self.door_meshes, camera)
         } else {
@@ -407,6 +424,8 @@ impl Renderer {
                 door.draw(&mut pass, None, false);
             }
             self.shadow_ready = true;
+            self.shadow_updated = Instant::now();
+            self.stream_shadows_dirty = false;
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -458,7 +477,7 @@ impl Renderer {
         }
         self.occlusion
             .render(&mut encoder, view, &self.uniform_group, self.ao_enabled);
-        {
+        if self.transparency_enabled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("transparent water and glass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -570,6 +589,7 @@ impl Renderer {
                 triangles: self.visible_triangles,
                 chunks: self.visible_chunks,
                 ao_enabled: self.ao_enabled,
+                night_vision: self.night_vision,
                 grid: self.grid,
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,

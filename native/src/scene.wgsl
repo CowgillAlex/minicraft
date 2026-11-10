@@ -25,11 +25,10 @@ fn tonemap(color: vec3<f32>) -> vec3<f32> {
 }
 struct VertexIn {
     @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) color: vec3<f32>,
+    @location(1) normal: vec4<f32>,
+    @location(2) color: vec4<f32>,
     @location(3) ao: vec4<f32>,
     @location(5) uv: vec2<f32>,
-    @location(4) material: f32,
 };
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -44,11 +43,11 @@ struct VertexOut {
     var out: VertexOut;
     out.position = scene.view_proj * vec4(v.position, 1.0);
     out.world = v.position;
-    out.normal = v.normal;
-    out.color = v.color;
+    out.normal = v.normal.xyz;
+    out.color = v.color.rgb;
     out.ao = v.ao;
     out.uv = v.uv;
-    out.material = v.material;
+    out.material = round(v.color.a * 255.0);
     return out;
 }
 @vertex fn vs_shadow(v: VertexIn) -> @builtin(position) vec4<f32> {
@@ -108,7 +107,9 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     let normal = normalize(v.normal);
     let direction = normalize(v.world - scene.camera.xyz);
     let sunlight = max(dot(normal, scene.sun.xyz), 0.0);
-    var visibility = shadow_visibility(v.world, normal);
+    let field=lighting_at(v.world,normal);
+    var visibility=0.0;
+    if !streamed_world() || field.y>=0.001 || scene.options.w>0.5 { visibility=shadow_visibility(v.world,normal); }
     if scene.options.w > 0.5 {
         var out: SurfaceOut;
         out.color=vec4(vec3(visibility),1.0);
@@ -120,10 +121,8 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     let noise = fract(sin(dot(voxel, vec3(12.9898, 78.233, 39.425))) * 43758.5453);
     base *= 0.94 + noise * 0.12;
     let voxel_ao = mix(mix(v.ao.x,v.ao.y,v.uv.x),mix(v.ao.w,v.ao.z,v.uv.x),v.uv.y);
-    let field=lighting_at(v.world,normal);
-    if streamed_world() && field.y<0.001 {visibility=0.0;}
     let sky_tint=mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x);
-    let sky_light=sky_tint*pow(field.y,1.35)*(0.7+0.3*max(normal.y,0.0));
+    let sky_light=max(sky_tint*pow(field.y,1.35),vec3(0.48,0.55,0.64)*scene.light_color.w)*(0.7+0.3*max(normal.y,0.0));
     let block_light=vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
     let ambient=base*(sky_light+block_light)*mix(1.0,voxel_ao,scene.options.z);
     let direct=base*scene.light_color.rgb*scene.sun.w*sunlight*visibility;
@@ -209,13 +208,14 @@ fn shade_water(v: VertexOut, front: bool) -> vec4<f32> {
     let transmission = exp(-thickness*0.26)*(1.0-reflected);
     let alpha = clamp(1.0-transmission,0.08,0.98);
     let field = lighting_at(v.world,normal);
-    var visibility = shadow_visibility(v.world,normalize(v.normal));
-    if streamed_world() && field.y<0.001 {visibility=0.0;}
+    var visibility=0.0;
+    if !streamed_world() || field.y>=0.001 { visibility=shadow_visibility(v.world,normalize(v.normal)); }
     let sky = mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x)*pow(field.y,1.35);
     let lamp = vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
     let sunlight = scene.light_color.rgb*scene.sun.w*max(dot(normal,scene.sun.xyz),0.0)*visibility;
-    let tint = vec3(0.025,0.16,0.20)*(sky+lamp+sunlight);
-    let reflection = sky_color(reflect(view,wave))*pow(field.y,1.35)*mix(0.25,1.0,visibility);
+    let tint = vec3(0.025,0.16,0.20)*max(sky+lamp+sunlight,vec3(0.48,0.55,0.64)*scene.light_color.w);
+    var reflection=vec3(0.0);
+    if field.y>0.001 { reflection=sky_color(reflect(view,wave))*pow(field.y,1.35)*mix(0.25,1.0,visibility); }
     let specular = pow(max(dot(reflect(-scene.sun.xyz,wave),-view),0.0),96.0);
     var color = tint*(1.0-reflected/max(alpha,0.0001)) + reflection*reflected/max(alpha,0.0001);
     color += scene.light_color.rgb*scene.sun.w*specular*visibility*0.45;
