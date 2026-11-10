@@ -1,4 +1,4 @@
-use super::{buffer, gpu_chunk, GpuChunk, SceneMesh};
+use super::{buffer, gpu_chunk_packed, GpuChunk, SceneMesh};
 use crate::{
     light_volume::RegionLight,
     startup::Progress,
@@ -14,20 +14,23 @@ pub(super) struct Resident {
     light: Option<RegionLight>,
     bytes: usize,
     valid: bool,
+    light_revision: u64,
 }
 struct Pending {
     region: Region,
-    meshes: std::vec::IntoIter<(Key, std::sync::Arc<crate::mesh::Mesh>)>,
+    meshes: std::vec::IntoIter<(Key, std::sync::Arc<crate::gpu_vertex::PackedMesh>)>,
     uploaded: HashMap<Key, Option<GpuChunk>>,
     light: Option<RegionLight>,
 }
 pub(super) struct Terrain {
     stream: Stream,
+    local: crate::local_light::LocalLight,
     regions: HashMap<Key, Resident>,
     initial: Option<Region>,
     pending: Option<Pending>,
     position: Vec3,
     radius: f32,
+    draw_order: Vec<Key>,
 }
 impl SceneMesh {
     pub(super) fn infinite(
@@ -51,6 +54,7 @@ impl SceneMesh {
             radius,
             HashMap::from([(key, initial.bytes)]),
         );
+        let local = crate::local_light::LocalLight::new(world.noise_preview.unwrap());
         Ok(Self {
             world,
             vertices: buffer(
@@ -73,11 +77,13 @@ impl SceneMesh {
             stream: None,
             terrain: Some(Terrain {
                 stream,
+                local,
                 regions: HashMap::new(),
                 initial: Some(initial),
                 pending: None,
                 position,
                 radius,
+                draw_order: Vec::new(),
             }),
         })
     }
@@ -126,6 +132,9 @@ impl SceneMesh {
                 loaded,
                 Some((&self.world, cells)),
             );
+            terrain
+                .local
+                .edit(&self.world, cells, terrain.stream.revision);
         }
     }
     pub fn light_at(&self, position: Vec3) -> Option<&wgpu::BindGroup> {
@@ -142,6 +151,9 @@ impl SceneMesh {
     }
 }
 impl Terrain {
+    pub(super) fn invalidate_order(&mut self) {
+        self.draw_order.clear();
+    }
     fn loaded(&self) -> HashMap<Key, usize> {
         self.regions
             .iter()
@@ -150,7 +162,7 @@ impl Terrain {
             .collect()
     }
     pub(super) fn pending(&self) -> bool {
-        self.pending.is_some() || self.stream.pending()
+        self.pending.is_some() || self.stream.pending() || self.local.pending()
     }
     fn begin(
         &mut self,
@@ -170,6 +182,14 @@ impl Terrain {
             || !terrain_region::visible(region.key, self.position, self.radius)
         {
             return;
+        }
+        if let Some(field) = region.field.take() {
+            self.local.seed(crate::local_light::Seed {
+                key: region.key,
+                field: *field,
+                revision: region.revision,
+                focus: self.position,
+            });
         }
         let light = region.light.take().map(|pixels| {
             RegionLight::new(device, queue, layout, region.key.map(|v| v * 128), &pixels)
@@ -235,13 +255,16 @@ impl Terrain {
                         light: pending.light,
                         bytes: pending.region.bytes,
                         valid: true,
+                        light_revision: pending.region.revision,
                     },
                 );
                 return true;
             };
             bytes += mesh.vertices.len() * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
                 + (mesh.indices.len() + mesh.transparent_indices.len()) * 4;
-            pending.uploaded.insert(key, gpu_chunk(device, key, &mesh));
+            pending
+                .uploaded
+                .insert(key, gpu_chunk_packed(device, key, &mesh));
         }
         false
     }
@@ -251,10 +274,34 @@ impl Terrain {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        position: Vec3,
+        camera: &crate::camera::Camera,
         radius: f32,
     ) -> bool {
+        let position = camera.position;
+        let direction = camera.direction();
+        let turned = self.stream.direction.dot(direction) < 0.9;
+        self.stream.direction = direction;
         let mut changed = false;
+        while let Ok(update) = self.local.results.try_recv() {
+            self.local.received();
+            if let Some(resident) = self.regions.get_mut(&update.key) {
+                if update.revision >= resident.light_revision {
+                    if let Some(light) = &resident.light {
+                        light.write(queue, &update.pixels);
+                        resident.light_revision = update.revision;
+                    }
+                }
+            }
+            if let Some(pending) = &self.pending {
+                if pending.region.key == update.key && update.revision >= pending.region.revision {
+                    if let Some(light) = &pending.light {
+                        light.write(queue, &update.pixels);
+                    }
+                }
+            }
+        }
+        let moved =
+            crate::mesh_stream::center(self.position) != crate::mesh_stream::center(position);
         self.position = position;
         self.radius = radius;
         if self.pending.as_ref().is_some_and(|pending| {
@@ -265,6 +312,7 @@ impl Terrain {
         }
         if crate::mesh_stream::center(position) != self.stream.center
             || radius != self.stream.radius
+            || turned
         {
             let before = self.regions.len();
             self.regions
@@ -280,6 +328,12 @@ impl Terrain {
         while start.elapsed().as_micros() < 2000 {
             if self.pending.is_none() {
                 match self.stream.results.try_recv() {
+                    Ok(Ok(crate::terrain_stream::Update::Pages(pages))) => {
+                        self.stream.received();
+                        for (key, data) in pages {
+                            scene.world.insert_page(key, data);
+                        }
+                    }
                     Ok(Ok(crate::terrain_stream::Update::Evicted(keys))) => {
                         self.stream.received();
                         for key in keys {
@@ -300,15 +354,25 @@ impl Terrain {
                 break;
             }
         }
+        if changed || moved || self.draw_order.is_empty() {
+            self.draw_order = scene
+                .replacements
+                .iter()
+                .filter_map(|(k, c)| c.as_ref().map(|_| *k))
+                .collect();
+            self.draw_order.sort_by(|a, b| {
+                let center = |k: Key| World::meters(k[0] * 32 + 16, k[1] * 32 + 16, k[2] * 32 + 16);
+                center(*a)
+                    .distance_squared(position)
+                    .total_cmp(&center(*b).distance_squared(position))
+            });
+        }
         changed
     }
     pub(super) fn chunks<'a>(&self, scene: &'a SceneMesh) -> Vec<&'a GpuChunk> {
-        let mut chunks: Vec<_> = scene.replacements.values().flatten().collect();
-        chunks.sort_by(|a, b| {
-            a.center
-                .distance_squared(self.position)
-                .total_cmp(&b.center.distance_squared(self.position))
-        });
-        chunks
+        self.draw_order
+            .iter()
+            .filter_map(|k| scene.replacements.get(k).and_then(Option::as_ref))
+            .collect()
     }
 }

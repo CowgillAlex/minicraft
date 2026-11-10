@@ -23,6 +23,8 @@ pub struct TerrainSampler<'a> {
     density: Sampler<'a>,
     aquifer: Aquifer,
     plan: Option<fast_density::Plan>,
+    prepared_cells: [Option<([i32; 3], fast_density::Prepared)>; 16],
+    uniform_cells: std::collections::HashMap<[i32; 3], Option<u8>>,
 }
 
 impl Generator {
@@ -41,6 +43,8 @@ impl Generator {
             density: Sampler::new(&self.density),
             aquifer: Aquifer::new(self.seed),
             plan: self.plan,
+            prepared_cells: [None; 16],
+            uniform_cells: Default::default(),
         }
     }
 }
@@ -55,7 +59,52 @@ impl TerrainSampler<'_> {
         self.aquifer.substance(&mut self.density, point, value)
     }
 
+    /// The same density expression as page fills, cached by interpolation cell.
+    pub fn material_fast(&mut self, point: [f64; 3]) -> u8 {
+        let key =
+            std::array::from_fn::<_, 3, _>(|i| (point[i] / [4.0, 8.0, 4.0][i]).floor() as i32);
+        let slot = ((key[0].wrapping_mul(3) ^ key[1].wrapping_mul(5) ^ key[2].wrapping_mul(7))
+            as usize)
+            & 15;
+        if self.prepared_cells[slot].is_none_or(|(k, _)| k != key) {
+            self.prepared_cells[slot] = self
+                .plan
+                .and_then(|p| p.prepare(&mut self.density, point, point))
+                .map(|p| (key, p));
+        }
+        let value =
+            self.prepared_cells[slot].map_or_else(|| self.density(point), |(_, p)| p.sample(point));
+        let value = if value.abs() < 1e-10 {
+            self.density(point)
+        } else {
+            value
+        };
+        self.aquifer.substance(&mut self.density, point, value)
+    }
+
     pub fn uniform_material(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<u8> {
+        let sizes = [4.0, 8.0, 4.0];
+        let key = std::array::from_fn::<_, 3, _>(|i| (min[i] / sizes[i]).floor() as i32);
+        let lo = std::array::from_fn(|i| f64::from(key[i]) * sizes[i]);
+        let hi = std::array::from_fn(|i| lo[i] + sizes[i] - 1.0 / 16.0);
+        if (0..3).all(|i| max[i] <= hi[i]) {
+            let cached = if let Some(value) = self.uniform_cells.get(&key) {
+                *value
+            } else {
+                let value = self.uniform_raw(lo, hi);
+                if self.uniform_cells.len() >= 16384 {
+                    self.uniform_cells.clear();
+                }
+                self.uniform_cells.insert(key, value);
+                value
+            };
+            if cached.is_some() {
+                return cached;
+            }
+        }
+        self.uniform_raw(min, max)
+    }
+    fn uniform_raw(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<u8> {
         let bounds = self.density.bounds(self.density.density.roots[0], min, max);
         // Only classify well away from zero; borderline samples retain the reference path.
         if bounds.low > 1e-9 {

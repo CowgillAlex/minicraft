@@ -36,7 +36,13 @@ pub fn page_region(key: Key) -> Key {
 pub fn visible(key: Key, position: Vec3, radius: f32) -> bool {
     center(key).distance(position) <= radius + METRES * 3.0_f32.sqrt() / 2.0
 }
-pub fn candidates(world: &World, position: Vec3, radius: f32) -> Vec<Key> {
+pub fn candidates(
+    world: &World,
+    position: Vec3,
+    radius: f32,
+    direction: Vec3,
+    travel: Vec3,
+) -> Vec<Key> {
     let c = key(position);
     let r = (radius / METRES).ceil() as i32 + 1;
     let mut keys = Vec::new();
@@ -47,29 +53,35 @@ pub fn candidates(world: &World, position: Vec3, radius: f32) -> Vec<Key> {
                 if visible(key, position, radius)
                     && world.contains([x * CELLS, y * CELLS, z * CELLS])
                 {
-                    keys.push(key);
+                    let offset = center(key) - position;
+                    let distance = offset.length();
+                    let facing = offset.normalize_or_zero().dot(direction);
+                    let ahead = offset.normalize_or_zero().dot(travel);
+                    let score = if distance < 8.0 {
+                        distance - 100.0
+                    } else {
+                        distance * (1.3 - facing * 0.55 - ahead * 0.25)
+                    };
+                    keys.push((key, score));
                 }
             }
         }
     }
-    keys.sort_by(|a, b| {
-        center(*a)
-            .distance_squared(position)
-            .total_cmp(&center(*b).distance_squared(position))
-    });
-    keys
+    keys.sort_by(|a, b| a.1.total_cmp(&b.1));
+    keys.into_iter().map(|(key, _)| key).collect()
 }
 pub struct Region {
     pub key: Key,
     pub revision: u64,
     pub pages: Vec<(Key, Chunk)>,
     pub evicted: Vec<Key>,
-    pub meshes: Vec<(Key, Arc<Mesh>)>,
+    pub meshes: Vec<(Key, Arc<crate::gpu_vertex::PackedMesh>)>,
     pub light: Option<Arc<[u8]>>,
     pub bytes: usize,
+    pub field: Option<Box<LightField>>,
 }
 struct CachedMesh {
-    meshes: Vec<(Key, Arc<Mesh>)>,
+    meshes: Vec<(Key, Arc<crate::gpu_vertex::PackedMesh>)>,
     gpu: usize,
     cpu: usize,
     used: u64,
@@ -83,6 +95,8 @@ pub struct Builder<'a> {
     clock: u64,
     meshes: HashMap<Key, CachedMesh>,
     mesh_bytes: usize,
+    tiles: crate::light_tiles::Tiles,
+    pages: Option<crate::terrain_pages::Pages>,
 }
 impl<'a> Builder<'a> {
     pub fn new(world: World, generator: &'a Generator, sky: Sky) -> Self {
@@ -96,6 +110,8 @@ impl<'a> Builder<'a> {
             clock: 0,
             meshes: HashMap::new(),
             mesh_bytes: 0,
+            tiles: Default::default(),
+            pages: None,
         }
     }
     pub fn into_parts(self) -> (World, Sky) {
@@ -104,6 +120,7 @@ impl<'a> Builder<'a> {
     pub fn edit(&mut self, snapshot: &World, cells: &[[i32; 3]]) {
         self.world.copy_edits_from(snapshot);
         self.sky.invalidate(cells);
+        self.tiles.invalidate(cells);
         if !cells.is_empty() {
             let min =
                 std::array::from_fn::<_, 3, _>(|i| cells.iter().map(|p| p[i]).min().unwrap() - 128);
@@ -117,13 +134,12 @@ impl<'a> Builder<'a> {
                     && p[2] + 128 >= min[2]
                     && p[1] <= max[1])
             });
+            let min =
+                std::array::from_fn::<_, 3, _>(|i| cells.iter().map(|p| p[i]).min().unwrap() - 1);
+            let max =
+                std::array::from_fn::<_, 3, _>(|i| cells.iter().map(|p| p[i]).max().unwrap() + 1);
             self.meshes.retain(|key, _| {
-                let p = key.map(|v| v * 128);
-                !(p[0] <= max[0]
-                    && p[0] + 128 >= min[0]
-                    && p[2] <= max[2]
-                    && p[2] + 128 >= min[2]
-                    && p[1] <= max[1])
+                !(0..3).all(|i| key[i] * 128 <= max[i] && key[i] * 128 + 128 > min[i])
             });
             self.mesh_bytes = self.meshes.values().map(|m| m.cpu).sum();
         }
@@ -149,8 +165,12 @@ impl<'a> Builder<'a> {
         focus: Vec3,
         cancel: impl Fn() -> bool,
     ) -> Option<Region> {
+        let started = std::time::Instant::now();
+        let mut phases = [0.0; 4];
+        let mut local_field = None;
         let mut added = HashSet::new();
         self.ensure(key, 0, &cancel, &mut added)?;
+        phases[0] = started.elapsed().as_secs_f64();
         self.clock = self.clock.wrapping_add(1);
         let (meshes, mut bytes) = if let Some(cache) = self.meshes.get_mut(&key) {
             cache.used = self.clock;
@@ -184,7 +204,8 @@ impl<'a> Builder<'a> {
                             * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
                             + (mesh.indices.len() + mesh.transparent_indices.len()) * 4;
                         if !mesh.vertices.is_empty() {
-                            meshes.push((page, Arc::new(mesh)));
+                            meshes
+                                .push((page, Arc::new(crate::gpu_vertex::PackedMesh::from(mesh))));
                         }
                     }
                 }
@@ -193,7 +214,7 @@ impl<'a> Builder<'a> {
             let cpu = meshes
                 .iter()
                 .map(|(_, m)| {
-                    m.vertices.capacity() * std::mem::size_of::<crate::mesh::Vertex>()
+                    m.vertices.capacity() * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
                         + (m.indices.capacity() + m.transparent_indices.capacity()) * 4
                 })
                 .sum::<usize>();
@@ -223,6 +244,7 @@ impl<'a> Builder<'a> {
             }
             (meshes, bytes)
         };
+        phases[1] = started.elapsed().as_secs_f64() - phases[0];
         let origin = key.map(|v| v * CELLS);
         let objects = self.world.doors.iter().any(|d| {
             d.occupied()
@@ -234,13 +256,38 @@ impl<'a> Builder<'a> {
             *used = self.clock;
             Some(light.clone())
         } else {
-            self.ensure(key, 4, &cancel, &mut added)?;
-            let low = origin.map(|v| v - 128);
-            let field = LightField::build_region(&self.world, low, [96; 3], |point| {
-                self.sky
-                    .values(&self.world, &mut self.sampler, point, low[1], 96)
+            phases[2] = started.elapsed().as_secs_f64() - phases[0] - phases[1];
+            self.pages.get_or_insert_with(|| {
+                crate::terrain_pages::Pages::new(self.world.noise_preview.unwrap())
             });
+            let low = origin.map(|v| v - 128);
+            let mut field = LightField::build_sampled(
+                &self.world,
+                low,
+                [96; 3],
+                &mut crate::light_tiles::Source::new(
+                    &self.world,
+                    &mut self.sampler,
+                    &mut self.sky,
+                    &mut self.tiles,
+                    &cancel,
+                )
+                .parallel(self.pages.as_ref().expect("terrain pool")),
+            )?;
             let light: Arc<[u8]> = field.crop([31; 3], [34; 3]).into();
+            if center(key).distance(focus) < 20.0 {
+                field.prepare_edits(
+                    &mut crate::light_tiles::Source::new(
+                        &self.world,
+                        &mut self.sampler,
+                        &mut self.sky,
+                        &mut self.tiles,
+                        &cancel,
+                    )
+                    .parallel(self.pages.as_ref().unwrap()),
+                );
+                local_field = Some(Box::new(field));
+            }
             if self.lights.len() >= 768 {
                 if let Some(old) = self
                     .lights
@@ -254,6 +301,17 @@ impl<'a> Builder<'a> {
             self.lights.insert(key, (light.clone(), self.clock));
             Some(light)
         };
+        phases[3] = started.elapsed().as_secs_f64() - phases[..3].iter().sum::<f64>();
+        if std::env::var_os("MINICRAFT_PROFILE_STREAM").is_some() {
+            eprintln!(
+                "PROFILE {key:?} data={:.4} mesh={:.4} halo={:.4} light={:.4} total={:.4}",
+                phases[0],
+                phases[1],
+                phases[2],
+                phases[3],
+                started.elapsed().as_secs_f64()
+            );
+        }
         if light.is_some() {
             bytes += 34_usize.pow(3) * 2;
         }
@@ -278,6 +336,7 @@ impl<'a> Builder<'a> {
             evicted,
             meshes,
             light,
+            field: local_field,
             bytes,
         })
     }
@@ -289,23 +348,15 @@ impl<'a> Builder<'a> {
         added: &mut HashSet<Key>,
     ) -> Option<()> {
         let preview = self.world.noise_preview.expect("infinite source");
+        let mut missing = Vec::new();
         for y in (key[1] * 4 - padding).max(0)
             ..(key[1] * 4 + 4 + padding).min(self.world.chunks_y() as i32)
         {
             for z in key[2] * 4 - padding..key[2] * 4 + 4 + padding {
                 for x in key[0] * 4 - padding..key[0] * 4 + 4 + padding {
-                    if cancel() {
-                        return None;
-                    }
                     let page = [x, y, z];
                     if self.world.page(page).is_none() {
-                        let chunk = crate::worldgen::page::generate(
-                            preview,
-                            &mut self.sampler,
-                            page.map(|v| v * 32),
-                        )
-                        .data;
-                        self.world.insert_page(page, chunk);
+                        missing.push(page);
                     }
                     if !self.published.contains(&page) {
                         added.insert(page);
@@ -313,7 +364,74 @@ impl<'a> Builder<'a> {
                 }
             }
         }
+        if !missing.is_empty() {
+            let pool = self
+                .pages
+                .get_or_insert_with(|| crate::terrain_pages::Pages::new(preview));
+            for (key, data) in pool.generate(missing, cancel) {
+                self.world.insert_page(key, data);
+            }
+        }
+        if cancel() {
+            return None;
+        }
         Some(())
+    }
+    /// Publish the swept player corridor before waiting for meshes or light.
+    pub fn collision(
+        &mut self,
+        eye: Vec3,
+        travel: Vec3,
+        cancel: &dyn Fn() -> bool,
+    ) -> Vec<(Key, Chunk)> {
+        let feet = eye - Vec3::Y * crate::physics::EYE_HEIGHT;
+        let ahead = feet + travel * 8.0;
+        let lo = crate::ray::grid_position(feet.min(ahead) - Vec3::new(0.6, 0.3, 0.6))
+            .floor()
+            .as_ivec3()
+            .to_array()
+            .map(|v| v.div_euclid(32));
+        let hi = crate::ray::grid_position(feet.max(ahead) + Vec3::new(0.6, 2.1, 0.6))
+            .floor()
+            .as_ivec3()
+            .to_array()
+            .map(|v| v.div_euclid(32));
+        let mut missing = Vec::new();
+        let mut needed = Vec::new();
+        for y in lo[1].max(0)..=hi[1].min(self.world.chunks_y() as i32 - 1) {
+            for z in lo[2]..=hi[2] {
+                for x in lo[0]..=hi[0] {
+                    let key = [x, y, z];
+                    if !self.world.contains(key.map(|v| v * 32)) {
+                        continue;
+                    }
+                    if self.world.page(key).is_none() {
+                        missing.push(key);
+                    }
+                    if !self.published.contains(&key) {
+                        needed.push(key);
+                    }
+                }
+            }
+        }
+        let preview = self.world.noise_preview.unwrap();
+        if !missing.is_empty() {
+            let pool = self
+                .pages
+                .get_or_insert_with(|| crate::terrain_pages::Pages::new(preview));
+            for (key, data) in pool.generate(missing, cancel) {
+                self.world.insert_page(key, data);
+            }
+        }
+        needed
+            .into_iter()
+            .filter_map(|key| {
+                self.world.page(key).cloned().map(|page| {
+                    self.published.insert(key);
+                    (key, page)
+                })
+            })
+            .collect()
     }
     pub fn trim(&mut self, focus: Vec3) -> Vec<Key> {
         self.prune(focus, key(focus), DATA_BUDGET)
@@ -374,11 +492,11 @@ pub fn initial(preview: Preview, progress: &crate::startup::Progress) -> Result<
     let position = World::meters(100, y, 347) + Vec3::Y * 0.00002;
     world.spawn = Some(position);
     let region = key(position - Vec3::Y * 0.125);
-    progress.begin(crate::startup::Stage::Terrain, 1728);
+    progress.begin(crate::startup::Stage::Terrain, 216);
     let mut sampler = generator.sampler();
-    for cy in (region[1] * 4 - 4).max(0)..(region[1] * 4 + 8).min(world.chunks_y() as i32) {
-        for cz in region[2] * 4 - 4..region[2] * 4 + 8 {
-            for cx in region[0] * 4 - 4..region[0] * 4 + 8 {
+    for cy in (region[1] * 4 - 1).max(0)..(region[1] * 4 + 5).min(world.chunks_y() as i32) {
+        for cz in region[2] * 4 - 1..region[2] * 4 + 5 {
+            for cx in region[0] * 4 - 1..region[0] * 4 + 5 {
                 progress.check()?;
                 let key = [cx, cy, cz];
                 let data =

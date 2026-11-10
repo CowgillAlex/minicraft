@@ -269,14 +269,35 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
         if expected[0] < 0 {
             stream.request(center(expected), 0.0, HashMap::new(), None);
         }
-        let region = stream
+        let collision = stream
             .results
             .recv_timeout(Duration::from_secs(30))
             .unwrap()
             .unwrap();
         stream.received();
-        let crate::terrain_stream::Update::Region(region) = region else {
-            panic!("unexpected cache eviction")
+        let crate::terrain_stream::Update::Pages(collision) = collision else {
+            panic!("player data must arrive before visual work");
+        };
+        let feet = crate::ray::grid_position(
+            center(expected) - glam::Vec3::Y * crate::physics::EYE_HEIGHT,
+        )
+        .floor()
+        .as_ivec3()
+        .to_array()
+        .map(|v| v.div_euclid(32));
+        assert!(collision.iter().any(|(key, _)| *key == feet));
+        let region = loop {
+            let result = stream
+                .results
+                .recv_timeout(Duration::from_secs(30))
+                .unwrap()
+                .unwrap();
+            stream.received();
+            match result {
+                crate::terrain_stream::Update::Region(region) => break region,
+                crate::terrain_stream::Update::Pages(_) => {}
+                _ => panic!("unexpected cache eviction"),
+            }
         };
         assert_eq!(region.key, expected);
         assert!(!region.pages.is_empty());
@@ -296,14 +317,18 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
         HashMap::new(),
         Some((&edited, &[target])),
     );
-    let region = stream
-        .results
-        .recv_timeout(Duration::from_secs(30))
-        .unwrap()
-        .unwrap();
-    stream.received();
-    let crate::terrain_stream::Update::Region(region) = region else {
-        panic!("unexpected cache eviction")
+    let region = loop {
+        let result = stream
+            .results
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .unwrap();
+        stream.received();
+        match result {
+            crate::terrain_stream::Update::Region(r) => break r,
+            crate::terrain_stream::Update::Pages(_) => {}
+            _ => panic!("unexpected eviction"),
+        }
     };
     assert_eq!(region.revision, 1);
     let light = region

@@ -12,6 +12,7 @@ pub struct Plan {
     gate_value: f64,
 }
 
+#[derive(Clone, Copy)]
 pub struct Prepared {
     plan: Plan,
     values: [[f64; 8]; 5],

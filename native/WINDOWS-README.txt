@@ -1,7 +1,7 @@
-MINICRAFT v0.11.0
+MINICRAFT v0.12.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.11.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.12.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -11,7 +11,8 @@ close the window normally; Escape cancels loading. The normal world menu
 appears when ready. Full-height terrain now uses cached interpolation, exact
 uniform-region skipping and compressed uniform pages. Nearby meshes stream
 as you move, together with new terrain and lighting. Only the spawn area
-is prepared before play.
+and its small meshing border are prepared before play. Sampling runs on a
+bounded worker pool, prioritizing the view and travel direction.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
@@ -97,7 +98,8 @@ Water receives sunlight/moonlight shadows and sky occlusion. Wave highlights
 use actual light instead of adding a bright unlit ripple pattern.
 
 Infinite worlds bake light in nearby 8 metre regions with a lighting halo.
-Edits rebuild affected regions in the background. The village retains its
+Local edits repair cached lighting on a separate worker, so they can finish
+while terrain is still generating. Distant lighting follows in the background. The village retains its
 incremental light updates. Completed updates appear while editing continues.
 Loading terrain or Updating light indicates pending work.
 Geometry updates immediately.
@@ -115,8 +117,13 @@ screen chooses the seed. The default source origin is 120,-64,-20, covering
 the full -64 to 320 metre vertical range. Only nearby terrain is resident.
 
 Uniform 2 metre pages use one material value; mixed pages retain fine voxels.
+Uniform parts of mixed pages are skipped exactly during generation. Lighting
+samples cached transport rays instead of generating full hidden voxel halos.
+Exposed-face bit masks keep solid and enclosed water interiors out of meshing.
+Static vertices are packed on workers before upload to keep frames responsive.
 Terrain, meshes and light stream within render distance plus a 4 metre margin.
-Walking and flight stop at unloaded terrain. Spectator can travel ahead of
+Collision data loads first along an 8 metre corridor in your travel direction.
+Walking and flight stop at terrain that has not yet loaded. Spectator can travel ahead of
 loading. R waits for spawn terrain before resuming physics. Generated data
 and graphics use bounded caches; edits and doors survive leaving and returning
 in RAM. Creating another world or exiting discards them. No disk saves.

@@ -33,3 +33,19 @@ pub fn pack(vertices: &[Vertex]) -> Vec<GpuVertex> {
         })
         .collect()
 }
+
+/// Static streamed geometry is packed on the terrain worker, before GPU upload.
+pub struct PackedMesh {
+    pub vertices: Vec<GpuVertex>,
+    pub indices: Vec<u32>,
+    pub transparent_indices: Vec<u32>,
+}
+impl From<crate::mesh::Mesh> for PackedMesh {
+    fn from(mesh: crate::mesh::Mesh) -> Self {
+        Self {
+            vertices: pack(&mesh.vertices),
+            indices: mesh.indices,
+            transparent_indices: mesh.transparent_indices,
+        }
+    }
+}

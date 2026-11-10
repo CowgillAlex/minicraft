@@ -3,7 +3,7 @@ use crate::world::{self, World};
 use std::collections::HashMap;
 
 #[derive(Clone)]
-struct Column {
+pub(crate) struct Column {
     blocked: i32,
     water: Vec<(i32, i32)>,
 }
@@ -35,6 +35,25 @@ pub struct Sky {
     columns: HashMap<[i32; 2], Column>,
 }
 impl Sky {
+    pub fn missing(&mut self, origin: [i32; 3], size: [usize; 3]) -> Vec<[i32; 2]> {
+        if self.columns.len() + size[0] * size[2] > 131072 {
+            self.columns.clear();
+        }
+        let mut points = Vec::new();
+        for z in 0..size[2] {
+            for x in 0..size[0] {
+                let p = [origin[0] + x as i32 * 4 + 2, origin[2] + z as i32 * 4 + 2];
+                if !self.columns.contains_key(&p) {
+                    points.push(p);
+                }
+            }
+        }
+        points
+    }
+    pub fn insert(&mut self, p: [i32; 2], column: Column) {
+        self.columns.insert(p, column);
+    }
+
     pub fn invalidate(&mut self, cells: &[[i32; 3]]) {
         for p in cells {
             self.columns
@@ -61,7 +80,11 @@ impl Sky {
             .collect()
     }
 }
-fn sample_column(world: &World, sampler: &mut TerrainSampler<'_>, [x, z]: [i32; 2]) -> Column {
+pub(crate) fn sample_column(
+    world: &World,
+    sampler: &mut TerrainSampler<'_>,
+    [x, z]: [i32; 2],
+) -> Column {
     let preview = world.noise_preview.expect("procedural sky");
     let overrides = world.column_overrides(x, z);
     let mut column = Column {
@@ -71,7 +94,8 @@ fn sample_column(world: &World, sampler: &mut TerrainSampler<'_>, [x, z]: [i32; 
     let mut water = 0;
     let mut y = world.height() - 1;
     while y >= 0 {
-        let lo = y.div_euclid(32) * 32;
+        let lo = (y + preview.origin[1] * 16).div_euclid(128) * 128 - preview.origin[1] * 16;
+        let lo = lo.max(0);
         let uniform = if overrides.range(lo..=y).next().is_none() {
             sampler.uniform_material(preview.point([x, lo, z]), preview.point([x, y, z]))
         } else {
@@ -103,7 +127,7 @@ fn sample_column(world: &World, sampler: &mut TerrainSampler<'_>, [x, z]: [i32; 
             let material = overrides
                 .get(&yy)
                 .copied()
-                .unwrap_or_else(|| sampler.material(preview.point([x, yy, z])));
+                .unwrap_or_else(|| sampler.material_fast(preview.point([x, yy, z])));
             if world::opaque(material) {
                 column.blocked = yy;
                 stop = true;

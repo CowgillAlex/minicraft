@@ -167,6 +167,9 @@ impl SceneMesh {
             let replacement = gpu_chunk(device, chunk, &mesh);
             self.replacements.insert(chunk, replacement);
         }
+        if let Some(terrain) = &mut self.terrain {
+            terrain.invalidate_order();
+        }
         if let Some(stream) = &mut self.stream {
             let position = World::meters(
                 stream.center[0] * 32 + 16,
@@ -184,11 +187,12 @@ impl SceneMesh {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
-        position: Vec3,
+        camera: &crate::camera::Camera,
         radius: f32,
     ) -> bool {
+        let position = camera.position;
         if let Some(mut terrain) = self.terrain.take() {
-            let changed = terrain.update(self, device, queue, layout, position, radius);
+            let changed = terrain.update(self, device, queue, layout, camera, radius);
             self.terrain = Some(terrain);
             return changed;
         }
@@ -372,6 +376,29 @@ fn gpu_chunk(device: &wgpu::Device, key: [i32; 3], mesh: &Mesh) -> Option<GpuChu
             device,
             "chunk vertices",
             bytemuck::cast_slice(&crate::gpu_vertex::pack(&mesh.vertices)),
+            wgpu::BufferUsages::VERTEX,
+        ),
+        indices: optional_indices(device, &mesh.indices),
+        transparent: optional_indices(device, &mesh.transparent_indices),
+        count: mesh.indices.len() as u32,
+        transparent_count: mesh.transparent_indices.len() as u32,
+        center: World::meters(key[0] * 32 + 16, key[1] * 32 + 16, key[2] * 32 + 16),
+    })
+}
+
+fn gpu_chunk_packed(
+    device: &wgpu::Device,
+    key: [i32; 3],
+    mesh: &crate::gpu_vertex::PackedMesh,
+) -> Option<GpuChunk> {
+    if mesh.indices.is_empty() && mesh.transparent_indices.is_empty() {
+        return None;
+    }
+    Some(GpuChunk {
+        vertices: buffer(
+            device,
+            "streamed packed vertices",
+            bytemuck::cast_slice(&mesh.vertices),
             wgpu::BufferUsages::VERTEX,
         ),
         indices: optional_indices(device, &mesh.indices),

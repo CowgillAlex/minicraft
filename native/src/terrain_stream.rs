@@ -14,6 +14,8 @@ use std::{
 
 struct Request {
     position: Vec3,
+    direction: Vec3,
+    travel: Vec3,
     radius: f32,
     loaded: HashMap<Key, usize>,
     edits: Option<World>,
@@ -32,12 +34,14 @@ struct Shared {
 pub enum Update {
     Region(Region),
     Evicted(Vec<Key>),
+    Pages(Vec<(Key, crate::chunk::Chunk)>),
 }
 pub struct Stream {
     shared: Arc<Shared>,
     pub results: mpsc::Receiver<Result<Update, String>>,
     pub center: [i32; 3],
     pub radius: f32,
+    pub direction: Vec3,
     pub revision: u64,
 }
 impl Stream {
@@ -51,6 +55,8 @@ impl Stream {
         let shared = Arc::new(Shared {
             request: Mutex::new(Request {
                 position,
+                direction: Vec3::ZERO,
+                travel: Vec3::ZERO,
                 radius,
                 loaded,
                 edits: None,
@@ -88,6 +94,7 @@ impl Stream {
             results,
             center: crate::mesh_stream::center(position),
             radius,
+            direction: Vec3::ZERO,
             revision: 0,
         }
     }
@@ -99,6 +106,8 @@ impl Stream {
         edits: Option<(&World, &[[i32; 3]])>,
     ) {
         let mut request = self.shared.request.lock().unwrap();
+        request.travel = (position - request.position).normalize_or_zero();
+        request.direction = self.direction;
         request.position = position;
         request.radius = radius;
         request.loaded = loaded;
@@ -163,6 +172,8 @@ fn run(world: World, sky: Sky, shared: &Shared, sender: mpsc::SyncSender<Result<
             revision = request.revision;
             position = request.position;
             let radius = request.radius;
+            let direction = request.direction;
+            let travel = request.travel;
             ready = request.loaded.clone();
             recent.retain(|key, (e, r, _)| {
                 *e >= epoch && *r == revision && terrain_region::visible(*key, position, radius)
@@ -183,7 +194,18 @@ fn run(world: World, sky: Sky, shared: &Shared, sender: mpsc::SyncSender<Result<
                     return;
                 }
             }
-            wanted = terrain_region::candidates(&builder.world, position, radius).into();
+            let pages = builder.collision(position, travel, &|| {
+                shared.stop.load(Ordering::Acquire) || shared.epoch.load(Ordering::Acquire) != epoch
+            });
+            if !pages.is_empty() {
+                shared.waiting.fetch_add(1, Ordering::Relaxed);
+                if sender.send(Ok(Update::Pages(pages))).is_err() {
+                    return;
+                }
+            }
+            wanted =
+                terrain_region::candidates(&builder.world, position, radius, direction, travel)
+                    .into();
         }
         let next = std::iter::from_fn(|| wanted.pop_front()).find(|key| {
             !ready.contains_key(key)

@@ -1,6 +1,8 @@
 use crate::world::{self, World, AIR, CHUNK, WATER};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+#[path = "mesh_visibility.rs"]
+mod visibility;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug)]
@@ -163,30 +165,22 @@ impl Mesh {
         for axis in 0..3 {
             let u = (axis + 1) % 3;
             let v = (axis + 2) % 3;
-            for sign in [-1, 1] {
+            let visible = visibility::rows(&halo, axis);
+            for (sign, mut visible) in [-1, 1].into_iter().zip(visible) {
                 for slice in 0..n {
                     let mut mask = [Face::default(); CHUNK * CHUNK];
                     for j in 0..n {
-                        for i in 0..n {
+                        let mut row = visible[(slice * n + j) as usize];
+                        while row != 0 {
+                            let i = row.trailing_zeros() as i32;
+                            row &= row - 1;
                             let mut p = origin;
                             p[axis] += slice;
                             p[u] += i;
                             p[v] += j;
                             let material = get(p);
-                            if material == AIR {
-                                continue;
-                            }
                             let mut neighbor = p;
                             neighbor[axis] += sign;
-                            let other = get(neighbor);
-                            if (material == WATER && other != AIR && other != world::GLASS)
-                                || (material == world::GLASS && other != AIR && other != WATER)
-                                || (material != world::GLASS
-                                    && material != WATER
-                                    && world::opaque(other))
-                            {
-                                continue;
-                            }
                             let mut ao = [3; 4];
                             if material != WATER {
                                 for (corner, (a, b)) in
@@ -213,13 +207,9 @@ impl Mesh {
                         }
                     }
                     for j in 0..n {
-                        let mut i = 0;
-                        while i < n {
+                        while visible[(slice * n + j) as usize] != 0 {
+                            let i = visible[(slice * n + j) as usize].trailing_zeros() as i32;
                             let face = mask[(i + j * n) as usize];
-                            if face.material == AIR {
-                                i += 1;
-                                continue;
-                            }
                             let mergeable = face.ao.iter().all(|value| *value == face.ao[0]);
                             let mut w = 1;
                             while mergeable && i + w < n && mask[(i + w + j * n) as usize] == face {
@@ -270,11 +260,12 @@ impl Mesh {
                             };
                             indices.extend(triangles.map(|index| base + index));
                             for yy in 0..h {
+                                visible[(slice * n + j + yy) as usize] &=
+                                    !((u32::MAX >> (32 - w)) << i);
                                 for xx in 0..w {
                                     mask[(i + xx + (j + yy) * n) as usize] = Face::default();
                                 }
                             }
-                            i += w;
                         }
                     }
                 }

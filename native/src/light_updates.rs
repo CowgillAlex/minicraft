@@ -21,20 +21,65 @@ impl Bounds {
 impl LightField {
     /// Repair changed connections and sources, then remove/refill only affected light paths.
     pub fn update(&mut self, world: &World, edits: &[[i32; 3]]) -> Option<LightPatch> {
+        self.update_inner(world, edits, None)
+    }
+    pub fn update_sampled(
+        &mut self,
+        world: &World,
+        edits: &[[i32; 3]],
+        source: &mut dyn LightSource,
+    ) -> Option<LightPatch> {
+        self.update_inner(world, edits, Some(source))
+    }
+    fn update_inner(
+        &mut self,
+        world: &World,
+        edits: &[[i32; 3]],
+        mut source: Option<&mut dyn LightSource>,
+    ) -> Option<LightPatch> {
         let grid = self.grid;
+        if self.edges.is_empty() {
+            self.edges = vec![[BLOCKED; 6]; self.seeds.len()];
+            self.connect(|p, axis| {
+                if let Some(source) = source.as_mut() {
+                    source.edge(
+                        std::array::from_fn(|i| grid.origin[i] + p[i] as i32 * STEP + STEP / 2),
+                        axis,
+                    )
+                } else {
+                    edge_loss(world, grid, p, axis)
+                }
+            });
+        }
         let mut dirty = [Vec::new(), Vec::new()];
         let mut targets = HashSet::new();
         let mut columns = HashSet::new();
-        let bases: HashSet<_> = edits.iter().map(|cell| cell.map(|v| v / STEP)).collect();
+        let bases: HashSet<_> = edits
+            .iter()
+            .map(|cell| std::array::from_fn(|i| (cell[i] - grid.origin[i]).div_euclid(STEP)))
+            .collect();
         for base in bases {
-            columns.insert([base[0] as usize, base[2] as usize]);
+            if base[0] >= 0
+                && base[0] < grid.size[0] as i32
+                && base[2] >= 0
+                && base[2] < grid.size[2] as i32
+            {
+                columns.insert([base[0] as usize, base[2] as usize]);
+            }
             for p in around(base, 1, grid) {
                 let i = grid.index(p[0], p[1], p[2]);
                 for axis in 0..3 {
                     if p[axis] + 1 >= grid.size[axis] {
                         continue;
                     }
-                    let cost = edge_loss(world, grid, p, axis);
+                    let cost = if let Some(source) = source.as_mut() {
+                        source.edge(
+                            std::array::from_fn(|i| grid.origin[i] + p[i] as i32 * STEP + STEP / 2),
+                            axis,
+                        )
+                    } else {
+                        edge_loss(world, grid, p, axis)
+                    };
                     if cost != self.edges[i][axis * 2 + 1] {
                         let next = i + grid.strides[axis];
                         self.edges[i][axis * 2 + 1] = cost;
@@ -50,7 +95,19 @@ impl LightField {
             targets.extend(around(base, 3, grid).map(|p| grid.index(p[0], p[1], p[2])));
         }
         for [x, z] in columns {
-            for (y, value) in sky_column(world, x, z).into_iter().enumerate() {
+            let values = if let Some(source) = source.as_mut() {
+                source.sky(
+                    [
+                        grid.origin[0] + x as i32 * STEP + STEP / 2,
+                        grid.origin[2] + z as i32 * STEP + STEP / 2,
+                    ],
+                    grid.origin[1],
+                    grid.size[1],
+                )
+            } else {
+                sky_column(world, x, z)
+            };
+            for (y, value) in values.into_iter().enumerate() {
                 let i = grid.index(x, y, z);
                 if self.seeds[i][1] != value {
                     self.seeds[i][1] = value;
@@ -58,7 +115,7 @@ impl LightField {
                 }
             }
         }
-        self.update_emitters(world, &targets, &mut dirty[0]);
+        self.update_emitters(world, &targets, &mut dirty[0], &mut source);
         let mut bounds = Bounds::new(grid);
         for (channel, mut nodes) in dirty.into_iter().enumerate() {
             nodes.sort_unstable();
@@ -80,7 +137,13 @@ impl LightField {
             pixels,
         })
     }
-    fn update_emitters(&mut self, world: &World, targets: &HashSet<usize>, dirty: &mut Vec<usize>) {
+    fn update_emitters(
+        &mut self,
+        world: &World,
+        targets: &HashSet<usize>,
+        dirty: &mut Vec<usize>,
+        source: &mut Option<&mut dyn LightSource>,
+    ) {
         let grid = self.grid;
         if targets.is_empty() {
             return;
@@ -93,15 +156,29 @@ impl LightField {
         }
         let (min, max) = bounds.region.unwrap();
         for &cell in &world.emitters {
-            let base = cell.map(|v| (v / STEP) as usize);
-            if (0..3).any(|axis| base[axis] + 1 < min[axis] || base[axis] > max[axis] + 1) {
+            let base =
+                std::array::from_fn::<_, 3, _>(|a| (cell[a] - grid.origin[a]).div_euclid(STEP));
+            if (0..3)
+                .any(|axis| base[axis] + 1 < min[axis] as i32 || base[axis] > max[axis] as i32 + 1)
+            {
                 continue;
             }
-            emitter_seeds(world, grid, cell, |i, value| {
-                if targets.contains(&i) {
-                    self.seeds[i][0] = self.seeds[i][0].max(value);
-                }
-            });
+            emitter_seeds_read(
+                grid,
+                cell,
+                |p| {
+                    if let Some(source) = source.as_mut() {
+                        source.material(p)
+                    } else {
+                        world.get(p[0], p[1], p[2])
+                    }
+                },
+                |i, value| {
+                    if targets.contains(&i) {
+                        self.seeds[i][0] = self.seeds[i][0].max(value);
+                    }
+                },
+            );
         }
         for (i, old) in previous {
             if self.seeds[i][0] != old {
@@ -161,10 +238,13 @@ impl LightField {
     }
 }
 fn around(base: [i32; 3], radius: i32, grid: Grid) -> impl Iterator<Item = [usize; 3]> {
-    let min: [usize; 3] = std::array::from_fn(|axis| (base[axis] - radius).max(0) as usize);
-    let max: [usize; 3] =
-        std::array::from_fn(|axis| (base[axis] + radius).min(grid.size[axis] as i32 - 1) as usize);
-    (min[2]..=max[2]).flat_map(move |z| {
-        (min[1]..=max[1]).flat_map(move |y| (min[0]..=max[0]).map(move |x| [x, y, z]))
+    let min = std::array::from_fn::<_, 3, _>(|a| {
+        (base[a] - radius).clamp(0, grid.size[a] as i32) as usize
+    });
+    let max = std::array::from_fn::<_, 3, _>(|a| {
+        (base[a] + radius + 1).clamp(0, grid.size[a] as i32) as usize
+    });
+    (min[2]..max[2]).flat_map(move |z| {
+        (min[1]..max[1]).flat_map(move |y| (min[0]..max[0]).map(move |x| [x, y, z]))
     })
 }

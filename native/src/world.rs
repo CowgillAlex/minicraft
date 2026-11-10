@@ -231,6 +231,32 @@ impl World {
             }
         }
     }
+    pub fn has_changes(&self, min: [i32; 3], max: [i32; 3]) -> bool {
+        let lo = min.map(|v| v.div_euclid(32));
+        let hi = max.map(|v| v.div_euclid(32));
+        for y in lo[1]..=hi[1] {
+            for z in lo[2]..=hi[2] {
+                for x in lo[0]..=hi[0] {
+                    let key = [x, y, z];
+                    if self.edits.contains_key(&key) || self.door_chunks.contains_key(&key) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    pub fn override_at(&self, p: [i32; 3]) -> Option<u8> {
+        let (key, index) = self.address(p[0], p[1], p[2])?;
+        let edit = self.edits.get(&key).and_then(|e| e.get(&index)).copied();
+        if edit.is_some_and(|m| m != AIR) {
+            return edit;
+        }
+        self.door_chunks
+            .get(&key)
+            .and_then(|c| (c[index] != AIR).then_some(c[index]))
+            .or(edit)
+    }
     pub fn column_overrides(&self, x: i32, z: i32) -> std::collections::BTreeMap<i32, u8> {
         let mut values = std::collections::BTreeMap::new();
         let cx = x.div_euclid(CHUNK as i32);
@@ -262,18 +288,23 @@ impl World {
         values
     }
     pub fn buried_chunk(&self, chunk: [i32; 3]) -> bool {
-        let full = |key| matches!(self.chunks.get(&key),Some(crate::chunk::Chunk::Uniform(material)) if opaque(*material));
-        full(chunk)
-            && [
-                [1, 0, 0],
-                [-1, 0, 0],
-                [0, 1, 0],
-                [0, -1, 0],
-                [0, 0, 1],
-                [0, 0, -1],
-            ]
-            .into_iter()
-            .all(|d| full(std::array::from_fn(|i| chunk[i] + d[i])))
+        let Some(Chunk::Uniform(material)) = self.chunks.get(&chunk) else {
+            return false;
+        };
+        if *material == AIR {
+            return true;
+        }
+        let blocked = |key| matches!(self.chunks.get(&key),Some(Chunk::Uniform(other)) if opaque(*other) || (*material==WATER && *other==WATER) || (*material==GLASS && *other==GLASS));
+        [
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+            [0, 0, -1],
+        ]
+        .into_iter()
+        .all(|d| blocked(std::array::from_fn(|i| chunk[i] + d[i])))
     }
     pub fn meters(x: i32, y: i32, z: i32) -> Vec3 {
         Vec3::new((x - WIDTH / 2) as f32, y as f32, (z - DEPTH / 2) as f32) * VOXEL

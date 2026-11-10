@@ -331,7 +331,7 @@ impl Renderer {
                 &self.device,
                 &self.queue,
                 &self.lighting.layout,
-                camera.position,
+                camera,
                 self.view.cache_radius(),
             ) {
                 self.shadow_ready = false;
@@ -359,7 +359,7 @@ impl Renderer {
             &self.device,
             &self.queue,
             &self.lighting.layout,
-            camera.position,
+            camera,
             self.view.cache_radius(),
         ) {
             self.stream_shadows_dirty = true;

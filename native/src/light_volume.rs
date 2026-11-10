@@ -211,8 +211,12 @@ fn upload(
 
 pub struct RegionLight {
     pub group: wgpu::BindGroup,
+    texture: wgpu::Texture,
 }
 impl RegionLight {
+    pub fn write(&self, queue: &wgpu::Queue, pixels: &[u8]) {
+        upload(queue, &self.texture, [0; 3], [34; 3], pixels);
+    }
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -250,6 +254,7 @@ impl RegionLight {
                 [8.5; 3],
                 true,
             ),
+            texture,
         }
     }
 }

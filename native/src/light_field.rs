@@ -81,6 +81,7 @@ pub(crate) fn loss(material: u8) -> u8 {
         _ => BLOCKED,
     }
 }
+#[cfg(test)]
 pub fn segment_loss(world: &World, from: Vec3, to: Vec3) -> u8 {
     let direction = to - from;
     let mut total = 0_u8;
@@ -134,7 +135,15 @@ fn sky_column(world: &World, x: usize, z: usize) -> Vec<u8> {
     }
     seeds
 }
-fn emitter_seeds(world: &World, grid: Grid, cell: [i32; 3], mut visit: impl FnMut(usize, u8)) {
+fn emitter_seeds(world: &World, grid: Grid, cell: [i32; 3], visit: impl FnMut(usize, u8)) {
+    emitter_seeds_read(grid, cell, |p| world.get(p[0], p[1], p[2]), visit);
+}
+fn emitter_seeds_read(
+    grid: Grid,
+    cell: [i32; 3],
+    mut read: impl FnMut([i32; 3]) -> u8,
+    mut visit: impl FnMut(usize, u8),
+) {
     let [x, y, z] = cell;
     let source = World::meters(x, y, z) + Vec3::splat(VOXEL * 0.5);
     let base = std::array::from_fn::<_, 3, _>(|i| (cell[i] - grid.origin[i]).div_euclid(STEP));
@@ -150,7 +159,14 @@ fn emitter_seeds(world: &World, grid: Grid, cell: [i32; 3], mut visit: impl FnMu
                 }
                 let p = p.map(|v| v as usize);
                 let target = grid.center(p);
-                let cost = segment_loss(world, source, target);
+                let direction = target - source;
+                let mut cost = 0_u8;
+                for (p, _) in VoxelRay::new(source, direction, direction.length()) {
+                    cost = cost.saturating_add(loss(read(p)));
+                    if cost == BLOCKED {
+                        break;
+                    }
+                }
                 if cost == BLOCKED {
                     continue;
                 }
@@ -163,7 +179,31 @@ fn emitter_seeds(world: &World, grid: Grid, cell: [i32; 3], mut visit: impl FnMu
         }
     }
 }
+pub trait LightSource {
+    fn prepare_sky(&mut self, _origin: [i32; 3], _size: [usize; 3]) {}
+    fn prepare_edges(&mut self, _origin: [i32; 3], _size: [usize; 3]) {}
+    fn cancelled(&self) -> bool;
+    fn material(&mut self, cell: [i32; 3]) -> u8;
+    fn sky(&mut self, point: [i32; 2], min_y: i32, len: usize) -> Vec<u8>;
+    fn edge(&mut self, point: [i32; 3], axis: usize) -> u8;
+}
+
 impl LightField {
+    /// Keep an editable graph ready even when uniform illumination needed no flood.
+    pub fn prepare_edits(&mut self, source: &mut impl LightSource) {
+        if !self.edges.is_empty() {
+            return;
+        }
+        let grid = self.grid;
+        source.prepare_edges(grid.origin, grid.size);
+        self.edges = vec![[BLOCKED; 6]; self.seeds.len()];
+        self.connect(|p, axis| {
+            source.edge(
+                std::array::from_fn(|i| grid.origin[i] + p[i] as i32 * STEP + STEP / 2),
+                axis,
+            )
+        });
+    }
     pub fn size(&self) -> [usize; 3] {
         self.grid.size
     }
@@ -179,6 +219,7 @@ impl LightField {
             seeds: vec![[0; 2]],
         }
     }
+    #[cfg(test)]
     pub fn build_region(
         world: &World,
         origin: [i32; 3],
@@ -231,8 +272,19 @@ impl LightField {
                 seeds: Vec::new(),
             };
         }
-        let mut edges = vec![[BLOCKED; 6]; count];
+        let mut field = Self {
+            grid,
+            pixels: seeds.iter().flatten().copied().collect(),
+            edges: vec![[BLOCKED; 6]; count],
+            seeds,
+        };
         let mut reader = world.reader();
+        field.connect(|p, axis| edge_loss_read(&mut reader, grid, p, axis));
+        field.fill();
+        field
+    }
+    fn connect(&mut self, mut edge: impl FnMut([usize; 3], usize) -> u8) {
+        let grid = self.grid;
         for z in 0..grid.size[2] {
             for y in 0..grid.size[1] {
                 for x in 0..grid.size[0] {
@@ -240,31 +292,109 @@ impl LightField {
                     let i = grid.index(x, y, z);
                     for axis in 0..3 {
                         if p[axis] + 1 < grid.size[axis] {
-                            let cost = edge_loss_read(&mut reader, grid, p, axis);
-                            edges[i][axis * 2 + 1] = cost;
-                            edges[i + grid.strides[axis]][axis * 2] = cost;
+                            let cost = edge(p, axis);
+                            self.edges[i][axis * 2 + 1] = cost;
+                            self.edges[i + grid.strides[axis]][axis * 2] = cost;
                         }
                     }
                 }
             }
         }
-        let pixels = seeds.iter().flatten().copied().collect();
-        let mut field = Self {
-            grid,
-            pixels,
-            edges,
-            seeds,
-        };
+    }
+    fn fill(&mut self) {
         for (channel, decay) in [BLOCK_FALLOFF, SKY_FALLOFF].into_iter().enumerate() {
             let mut buckets: Buckets = std::array::from_fn(|_| Vec::new());
-            for (i, seed) in field.seeds.iter().enumerate() {
+            for (i, seed) in self.seeds.iter().enumerate() {
                 if seed[channel] > decay {
                     buckets[seed[channel] as usize].push(i);
                 }
             }
-            field.propagate(channel, decay, &mut buckets, |_| {});
+            self.propagate(channel, decay, &mut buckets, |_| {});
         }
-        field
+    }
+    /// Reuse transport tiles shared by adjacent lighting regions.
+    pub fn build_sampled(
+        world: &World,
+        origin: [i32; 3],
+        size: [usize; 3],
+        source: &mut impl LightSource,
+    ) -> Option<Self> {
+        let profile_start = std::time::Instant::now();
+        let grid = Grid::region(origin, size);
+        let count = size.iter().product::<usize>();
+        let mut field = Self {
+            grid,
+            pixels: vec![0; count * 2],
+            edges: Vec::new(),
+            seeds: vec![[0; 2]; count],
+        };
+        source.prepare_sky(origin, size);
+        for z in 0..size[2] {
+            for x in 0..size[0] {
+                if source.cancelled() {
+                    return None;
+                }
+                let point = [
+                    origin[0] + x as i32 * STEP + STEP / 2,
+                    origin[2] + z as i32 * STEP + STEP / 2,
+                ];
+                for (y, value) in source
+                    .sky(point, origin[1], size[1])
+                    .into_iter()
+                    .enumerate()
+                {
+                    field.seeds[grid.index(x, y, z)][1] = value;
+                }
+            }
+        }
+        for &cell in &world.emitters {
+            emitter_seeds_read(
+                grid,
+                cell,
+                |p| source.material(p),
+                |i, value| field.seeds[i][0] = field.seeds[i][0].max(value),
+            );
+        }
+        let sky_time = profile_start.elapsed().as_secs_f64();
+        field.pixels = field.seeds.iter().flatten().copied().collect();
+        if field.seeds.iter().all(|s| *s == [0, 0]) || field.seeds.iter().all(|s| *s == [0, 255]) {
+            return Some(field);
+        }
+        source.prepare_edges(origin, size);
+        field.edges = vec![[BLOCKED; 6]; count];
+        for z in 0..size[2] {
+            if source.cancelled() {
+                return None;
+            }
+            for y in 0..size[1] {
+                for x in 0..size[0] {
+                    let p = [x, y, z];
+                    let i = grid.index(x, y, z);
+                    for axis in 0..3 {
+                        if p[axis] + 1 < size[axis] {
+                            let cost = source.edge(
+                                std::array::from_fn(|a| origin[a] + p[a] as i32 * STEP + STEP / 2),
+                                axis,
+                            );
+                            field.edges[i][axis * 2 + 1] = cost;
+                            field.edges[i + grid.strides[axis]][axis * 2] = cost;
+                        }
+                    }
+                }
+            }
+        }
+        if source.cancelled() {
+            return None;
+        }
+        let edges_time = profile_start.elapsed().as_secs_f64() - sky_time;
+        field.fill();
+        if std::env::var_os("MINICRAFT_PROFILE_STREAM").is_some() {
+            eprintln!(
+                "LIGHT sky={sky_time:.4} edges={edges_time:.4} fill={:.4}",
+                profile_start.elapsed().as_secs_f64() - sky_time - edges_time
+            );
+        }
+        Some(field)
     }
     fn propagate(
         &mut self,
