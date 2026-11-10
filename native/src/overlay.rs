@@ -2,12 +2,17 @@ use crate::{
     camera::Camera,
     editing::{self, Hit},
     hud::{Hud, HudVertex},
+    ui::{Layout, Rect, UiState},
 };
+pub const TEXT: [f32; 4] = [0.94, 0.95, 0.93, 1.0];
+pub const MUTED: [f32; 4] = [0.60, 0.65, 0.65, 1.0];
+pub const ACCENT: [f32; 4] = [0.65, 0.84, 0.66, 1.0];
 pub struct OverlayStats<'a> {
     pub voxels: usize,
     pub triangles: usize,
     pub chunks: usize,
     pub ao_enabled: bool,
+    pub grid: bool,
     pub material: u8,
     pub target: Option<Hit>,
     pub time: &'a str,
@@ -20,165 +25,195 @@ pub fn vertices(
     captured: bool,
     vsync: bool,
     stats: OverlayStats<'_>,
+    ui: &UiState,
 ) -> Vec<HudVertex> {
-    let mut hud = Hud::new(size.0, size.1);
-    let text = [0.78, 0.87, 0.83, 1.0];
-    let muted = [0.43, 0.58, 0.54, 1.0];
-    let accent = [0.31, 0.84, 0.62, 1.0];
-    hud.rect(16.0, 16.0, 350.0, 151.0, [0.015, 0.028, 0.027, 0.88]);
-    hud.rect(16.0, 16.0, 3.0, 151.0, accent);
-    hud.text("CEDAR / VOXEL LAB", 31.0, 29.0, 2.0, text);
+    let layout = Layout::new(size);
+    let mut hud = Hud::new(layout.width, layout.height);
+    let shadow = [0.0, 0.0, 0.0, 0.65];
+    hud.styled_text("MiniCraft", 25.0, 25.0, 16.0, shadow, true);
+    hud.styled_text("MiniCraft", 24.0, 24.0, 16.0, [0.94, 0.95, 0.93, 0.8], true);
+    let clock = Rect {
+        x: layout.width - 124.0,
+        y: 20.0,
+        w: 104.0,
+        h: 36.0,
+    };
+    hud.rounded_rect(clock, 10.0, [0.055, 0.067, 0.078, 0.88]);
+    let hour = stats
+        .time
+        .get(..2)
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(12);
+    crate::ui_icons::clock(
+        &mut hud,
+        clock.x + 20.0,
+        clock.y + 18.0,
+        !(6..19).contains(&hour),
+    );
+    hud.text(stats.time, clock.x + 38.0, clock.y + 10.0, 16.0, TEXT);
+    hotbar(&mut hud, &layout, stats.material);
+    hud.text("F1  Controls", 25.0, layout.height - 37.0, 13.0, shadow);
     hud.text(
-        &format!(
-            "V{} / {} / AO {}",
-            env!("CARGO_PKG_VERSION"),
-            stats.time,
-            if stats.ao_enabled { "ON" } else { "OFF" }
-        ),
-        31.0,
-        52.0,
-        1.5,
-        muted,
+        "F1  Controls",
+        24.0,
+        layout.height - 38.0,
+        13.0,
+        [0.85, 0.89, 0.86, 0.8],
     );
-    hud.text(
-        &format!(
-            "{:3.0} FPS   {:4.1} MS   {}",
-            fps,
-            if fps > 0.0 { 1000.0 / fps } else { 0.0 },
-            if vsync { "VSYNC" } else { "UNCAPPED" }
-        ),
-        31.0,
-        76.0,
-        1.5,
-        accent,
-    );
-    hud.text(
-        &format!("{:.2}M VOXELS  /  6.25 CM", stats.voxels as f32 / 1e6),
-        31.0,
-        97.0,
-        1.5,
-        text,
-    );
-    hud.text(
-        &format!(
-            "{}K TRIS  /  {} CHUNKS",
-            stats.triangles / 1000,
-            stats.chunks
-        ),
-        31.0,
-        116.0,
-        1.5,
-        text,
-    );
-    hud.text(
-        &format!(
-            "XYZ {:.1} {:.1} {:.1}",
-            camera.position.x, camera.position.y, camera.position.z
-        ),
-        31.0,
-        139.0,
-        1.5,
-        muted,
-    );
-    let palette_width = editing::PALETTE.len() as f32 * 33.0 + 28.0;
-    let palette_x = size.0 as f32 - palette_width - 16.0;
-    hud.rect(
-        palette_x,
-        16.0,
-        palette_width,
-        66.0,
-        [0.015, 0.028, 0.027, 0.88],
-    );
-    hud.text(
-        "1-0 MATERIAL / B GLASS / MMB PICK",
-        palette_x + 12.0,
-        26.0,
-        1.0,
-        muted,
-    );
-    for (index, material) in editing::PALETTE.iter().enumerate() {
-        let x = palette_x + 13.0 + index as f32 * 33.0;
-        if *material == stats.material {
-            hud.rect(x - 2.0, 42.0, 28.0, 28.0, accent);
-        }
-        let color = crate::world::color(*material);
-        hud.rect(x, 44.0, 24.0, 24.0, [color[0], color[1], color[2], 1.0]);
+    if layout.width >= 1100.0 {
+        let speed = format!("Free flight   {:.1} m/s", camera.speed);
+        let speed_x = layout.width - 24.0 - Hud::text_width(&speed, 13.0, false);
+        hud.text(&speed, speed_x + 1.0, layout.height - 37.0, 13.0, shadow);
         hud.text(
-            &if index == 10 {
-                "B".to_owned()
-            } else {
-                ((index + 1) % 10).to_string()
-            },
-            x + 3.0,
-            47.0,
-            1.0,
-            [0.015, 0.028, 0.027, 1.0],
+            &speed,
+            speed_x,
+            layout.height - 38.0,
+            13.0,
+            [0.85, 0.89, 0.86, 0.8],
         );
     }
-    let y = size.1 as f32 - 118.0;
-    hud.rect(
-        16.0,
-        y,
-        if size.0 < 1000 { 610.0 } else { 830.0 },
-        102.0,
-        [0.015, 0.028, 0.027, 0.87],
-    );
-    hud.text(
-        if captured {
-            "WASD MOVE / SPACE UP / SHIFT DOWN / CTRL BOOST"
-        } else {
-            "CLICK TO EXPLORE / SPACE UP / SHIFT DOWN / CTRL BOOST"
-        },
-        29.0,
-        y + 12.0,
-        1.5,
-        text,
-    );
-    hud.text(
-        "LMB BREAK / RMB PLACE / 1-0 MATERIAL / B GLASS / SCROLL SPEED",
-        29.0,
-        y + 34.0,
-        if size.0 < 1000 { 1.0 } else { 1.5 },
-        muted,
-    );
-    hud.text(
-        "- / = TIME / ESC RELEASE / R RESET / H HUD / G GRID / O AO / V VSYNC",
-        29.0,
-        y + 55.0,
-        if size.0 < 1000 { 1.0 } else { 1.5 },
-        muted,
-    );
-    let material = format!(
-        "PLACE {} / {}",
-        editing::material_name(stats.material),
-        stats
-            .target
-            .map(|hit| format!(
-                "TARGET {} {} {} / {:.2}M",
-                hit.cell[0], hit.cell[1], hit.cell[2], hit.distance
-            ))
-            .unwrap_or_else(|| "REACH 8M / NO TARGET".into())
-    );
-    hud.text(
-        &format!(
-            "{}{}",
-            material,
-            if stats.lighting_pending {
-                " / LIGHT BAKE"
-            } else {
-                ""
-            }
-        ),
-        29.0,
-        y + 77.0,
-        1.5,
-        accent,
-    );
+    if stats.lighting_pending {
+        hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
+    }
     if captured {
-        let x = size.0 as f32 / 2.0;
-        let y = size.1 as f32 / 2.0;
-        hud.rect(x - 4.0, y, 8.0, 1.0, [0.8, 0.95, 0.87, 0.7]);
-        hud.rect(x, y - 4.0, 1.0, 8.0, [0.8, 0.95, 0.87, 0.7]);
+        let (x, y) = (layout.width / 2.0, layout.height / 2.0);
+        for (dx, dy, w, h) in [
+            (-6.0, -0.5, 4.0, 1.0),
+            (2.0, -0.5, 4.0, 1.0),
+            (-0.5, -6.0, 1.0, 4.0),
+            (-0.5, 2.0, 1.0, 4.0),
+        ] {
+            hud.rect(
+                x + dx - 1.0,
+                y + dy - 1.0,
+                w + 2.0,
+                h + 2.0,
+                [0.0, 0.0, 0.0, 0.25],
+            );
+            hud.rect(x + dx, y + dy, w, h, [1.0, 1.0, 1.0, 0.8]);
+        }
+    }
+    if ui.debug && captured {
+        debug(&mut hud, camera, &stats, fps, vsync);
+    }
+    if !captured {
+        crate::ui_menu::draw(&mut hud, &layout, ui, &stats, vsync);
     }
     hud.vertices
+}
+fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
+    let bar = layout.hotbar();
+    hud.rounded_rect(
+        Rect {
+            y: bar.y + 3.0,
+            ..bar
+        },
+        13.0,
+        [0.0, 0.0, 0.0, 0.22],
+    );
+    hud.rounded_rect(bar, 13.0, [0.65, 0.71, 0.72, 0.25]);
+    hud.rounded_rect(
+        Rect {
+            x: bar.x + 1.0,
+            y: bar.y + 1.0,
+            w: bar.w - 2.0,
+            h: bar.h - 2.0,
+        },
+        12.0,
+        [0.035, 0.045, 0.050, 0.92],
+    );
+    let name = editing::material_name(material).to_ascii_lowercase();
+    let name = format!("{}{}", name[..1].to_ascii_uppercase(), &name[1..]);
+    let text_width = Hud::text_width(&name, 15.0, true) + 24.0;
+    hud.rounded_rect(
+        Rect {
+            x: layout.width / 2.0 - text_width / 2.0,
+            y: bar.y - 34.0,
+            w: text_width,
+            h: 26.0,
+        },
+        7.0,
+        [0.035, 0.045, 0.050, 0.82],
+    );
+    hud.centered(&name, layout.width / 2.0, bar.y - 29.0, 15.0, TEXT, true);
+    for (i, &m) in editing::PALETTE.iter().enumerate() {
+        let x = bar.x + 8.0 + i as f32 * 50.0;
+        let slot = Rect {
+            x,
+            y: bar.y + 7.0,
+            w: 48.0,
+            h: 50.0,
+        };
+        if m == material {
+            hud.rounded_rect(slot, 7.0, [0.80, 0.91, 0.79, 1.0]);
+            hud.rounded_rect(
+                Rect {
+                    x: x + 1.5,
+                    y: slot.y + 1.5,
+                    w: 45.0,
+                    h: 47.0,
+                },
+                5.5,
+                [0.14, 0.20, 0.17, 1.0],
+            );
+        } else {
+            hud.rounded_rect(slot, 7.0, [0.18, 0.22, 0.23, 0.42]);
+        }
+        crate::ui_icons::block(hud, x + 12.0, bar.y + 13.0, 26.0, m);
+        let key = if i == 10 {
+            "B".to_string()
+        } else {
+            ((i + 1) % 10).to_string()
+        };
+        hud.text(
+            &key,
+            x + 5.0,
+            bar.y + 43.0,
+            10.0,
+            if m == material { ACCENT } else { MUTED },
+        );
+    }
+}
+fn debug(hud: &mut Hud, camera: &Camera, stats: &OverlayStats<'_>, fps: f32, vsync: bool) {
+    let rows = [
+        format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")),
+        format!(
+            "{fps:.0} FPS  /  {:.1} ms",
+            if fps > 0.0 { 1000.0 / fps } else { 0.0 }
+        ),
+        format!("{} triangles / {} chunks", stats.triangles, stats.chunks),
+        format!("{:.2}M voxels", stats.voxels as f32 / 1e6),
+        format!(
+            "XYZ  {:.1}  {:.1}  {:.1}",
+            camera.position.x, camera.position.y, camera.position.z
+        ),
+        format!(
+            "AO {}  /  VSync {}",
+            if stats.ao_enabled { "on" } else { "off" },
+            if vsync { "on" } else { "off" }
+        ),
+        stats
+            .target
+            .map(|h| format!("Target {:?} / {:.2}m", h.cell, h.distance))
+            .unwrap_or_else(|| "No target within 8m".into()),
+    ];
+    hud.rounded_rect(
+        Rect {
+            x: 20.0,
+            y: 60.0,
+            w: 320.0,
+            h: 190.0,
+        },
+        10.0,
+        [0.025, 0.035, 0.04, 0.9],
+    );
+    for (i, row) in rows.iter().enumerate() {
+        hud.text(
+            row,
+            34.0,
+            74.0 + i as f32 * 23.0,
+            13.0,
+            if i == 0 { ACCENT } else { TEXT },
+        );
+    }
 }

@@ -28,11 +28,11 @@ BEGIN
  BEGIN
   BLOCK "040904b0"
   BEGIN
-   VALUE "FileDescription", "Cedar Voxel Lab"
+   VALUE "FileDescription", "MiniCraft"
    VALUE "FileVersion", "{}"
-   VALUE "ProductName", "Cedar Voxel Lab"
+   VALUE "ProductName", "MiniCraft"
    VALUE "ProductVersion", "{}"
-   VALUE "OriginalFilename", "voxel-drive.exe"
+   VALUE "OriginalFilename", "minicraft.exe"
   END
  END
  BLOCK "VarFileInfo"

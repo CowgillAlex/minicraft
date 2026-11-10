@@ -1,22 +1,29 @@
-CEDAR VOXEL LAB v0.2.1
+MINICRAFT v0.3.0
 Windows x64 / native Rust + wgpu
 
-Run cedar-voxel-lab-v0.2.1-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.3.0-windows-x64.exe. No installer or extra asset files.
 The world and lighting take a few seconds to generate when starting.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
+UI
+A compact bottom hotbar shows block previews and the selected material.
+Esc opens the clickable world menu. Settings control AO, VSync, voxel
+outlines, and time of day. F1 shows controls and F3 shows debug info.
+
 CONTROLS
-Click the scene: capture mouse
+Play / Back to world / Enter: capture mouse
 WASD: move horizontally
 Mouse: look
 Space / E: fly up
 Shift / Q: fly down
 Ctrl: move faster
 Scroll: change movement speed
-Esc: release mouse
+Esc: world menu / back
 - / =: move time backward / forward. Hold to advance faster.
 R: reset camera
-H: hide/show HUD
+F1: controls
+F3: debug info
+H: hide/show playing HUD
 G: show voxel boundaries
 O: toggle ambient occlusion
 V: toggle VSync
@@ -54,5 +61,9 @@ The finite 40 x 40 metre scene has terrain, cabins, roads, trees and a pond.
 Free flight has no collisions. This version has no car physics or AI.
 
 ERRORS
-Startup errors write voxel-drive-error.txt beside the executable and display
+Startup errors write minicraft-error.txt beside the executable and display
 a Windows error dialog. This build is not code-signed.
+
+FONT
+DejaVu Sans UI type. The font notice is embedded and available with
+--licenses, and included as FONT-LICENSE.txt in the ZIP package.

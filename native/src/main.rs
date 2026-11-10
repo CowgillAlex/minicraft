@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod app_ui;
 mod bloom;
 mod camera;
 mod capture;
@@ -15,6 +16,9 @@ mod pipelines;
 mod ray;
 mod renderer;
 mod scene_mesh;
+mod ui;
+mod ui_icons;
+mod ui_menu;
 mod world;
 
 use camera::Camera;
@@ -26,7 +30,7 @@ use winit::{
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Fullscreen, Window, WindowId},
+    window::{Fullscreen, Window, WindowId},
 };
 
 struct App {
@@ -83,22 +87,6 @@ impl App {
             surface.configure(&renderer.device, config);
         }
     }
-    fn capture_cursor(&mut self, capture: bool) {
-        if let Some(window) = &self.window {
-            let result = if capture {
-                window
-                    .set_cursor_grab(CursorGrabMode::Locked)
-                    .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-            } else {
-                window.set_cursor_grab(CursorGrabMode::None)
-            };
-            self.captured = capture && result.is_ok();
-            window.set_cursor_visible(!self.captured);
-            if !self.captured {
-                self.keys.clear();
-            }
-        }
-    }
     fn draw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
@@ -145,14 +133,6 @@ impl App {
             self.fps = self.frames as f32 / interval;
             self.frames = 0;
             self.stats_since = now;
-            if let Some(window) = &self.window {
-                window.set_title(&format!(
-                    "Cedar Voxel Lab v{} | {:.0} FPS | {} | 6.25cm voxels",
-                    env!("CARGO_PKG_VERSION"),
-                    self.fps,
-                    renderer.adapter_name
-                ));
-            }
         }
     }
 }
@@ -165,7 +145,7 @@ impl ApplicationHandler for App {
             let window = Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title("Cedar Voxel Lab - building world...")
+                        .with_title("MiniCraft - building world...")
                         .with_inner_size(PhysicalSize::new(1440, 900))
                         .with_min_inner_size(PhysicalSize::new(800, 600)),
                 )?,
@@ -184,6 +164,7 @@ impl ApplicationHandler for App {
                 view_formats: vec![],
             });
             surface.configure(&renderer.device, self.config.as_ref().unwrap());
+            window.set_title(&format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")));
             self.window = Some(window);
             self.surface = Some(surface);
             self.renderer = Some(renderer);
@@ -213,7 +194,7 @@ impl ApplicationHandler for App {
             } => {
                 if !self.captured {
                     if button == MouseButton::Left {
-                        self.capture_cursor(true);
+                        self.click_menu(event_loop);
                     }
                 } else if let Some(renderer) = &mut self.renderer {
                     match button {
@@ -228,7 +209,10 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::CursorMoved { position, .. } if !self.captured => {
+                self.move_ui_cursor(position);
+            }
+            WindowEvent::MouseWheel { delta, .. } if self.captured => {
                 let lines = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 50.0,
@@ -254,6 +238,9 @@ impl ApplicationHandler for App {
                         return;
                     }
                     if event.repeat {
+                        return;
+                    }
+                    if self.handle_ui_key(key) {
                         return;
                     }
                     match key {
@@ -288,13 +275,7 @@ impl ApplicationHandler for App {
                                 renderer.selected_material = crate::world::GLASS;
                             }
                         }
-                        KeyCode::Escape => self.capture_cursor(false),
                         KeyCode::KeyR => self.camera = Camera::default(),
-                        KeyCode::KeyH => {
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.hud_enabled = !renderer.hud_enabled;
-                            }
-                        }
                         KeyCode::KeyO => {
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.ao_enabled = !renderer.ao_enabled;
@@ -352,8 +333,12 @@ impl ApplicationHandler for App {
 }
 fn run() -> std::result::Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "--licenses") {
+        println!("{}", include_str!("../assets/FONT-LICENSE.txt"));
+        return Ok(());
+    }
     if args.iter().any(|arg| arg == "--version") {
-        println!("Cedar Voxel Lab v{}", env!("CARGO_PKG_VERSION"));
+        println!("MiniCraft v{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     if let Some(index) = args.iter().position(|arg| arg == "--screenshot") {
@@ -377,6 +362,20 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
             std::path::Path::new(path),
             capture::CaptureOptions {
                 frames,
+                ui: args
+                    .iter()
+                    .position(|arg| arg == "--ui")
+                    .and_then(|index| args.get(index + 1))
+                    .map(String::as_str),
+                size: args
+                    .iter()
+                    .position(|arg| arg == "--size")
+                    .map(|index| {
+                        let value = args.get(index + 1).ok_or("--size needs WIDTHxHEIGHT")?;
+                        let (w, h) = value.split_once('x').ok_or("--size needs WIDTHxHEIGHT")?;
+                        Ok::<_, Box<dyn Error>>((w.parse::<u32>()?, h.parse::<u32>()?))
+                    })
+                    .transpose()?,
                 verify_edits: args.iter().any(|arg| arg == "--verify-edits"),
                 closeup: args.iter().any(|arg| arg == "--ao-closeup"),
                 ao_enabled: !args.iter().any(|arg| arg == "--no-ao"),
@@ -408,15 +407,11 @@ fn main() {
 fn report_error(error: &str) {
     let path = std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|p| p.join("voxel-drive-error.txt")))
-        .unwrap_or_else(|| "voxel-drive-error.txt".into());
+        .and_then(|p| p.parent().map(|p| p.join("minicraft-error.txt")))
+        .unwrap_or_else(|| "minicraft-error.txt".into());
     let _ = std::fs::write(
         &path,
-        format!(
-            "Cedar Voxel Lab v{}\n{}\n",
-            env!("CARGO_PKG_VERSION"),
-            error
-        ),
+        format!("MiniCraft v{}\n{}\n", env!("CARGO_PKG_VERSION"), error),
     );
     eprintln!("{error}\nDetails saved to {}", path.display());
     #[cfg(target_os = "windows")]
@@ -437,7 +432,7 @@ fn report_error(error: &str) {
         .encode_wide()
         .chain(Some(0))
         .collect();
-        let title: Vec<u16> = std::ffi::OsStr::new("Cedar Voxel Lab")
+        let title: Vec<u16> = std::ffi::OsStr::new("MiniCraft")
             .encode_wide()
             .chain(Some(0))
             .collect();

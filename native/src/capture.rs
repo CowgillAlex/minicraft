@@ -4,6 +4,8 @@ use std::{fs::File, io::BufWriter, path::Path, sync::mpsc, time::Instant};
 /// Render through the same GPU pipelines without a desktop window, for validation.
 pub struct CaptureOptions<'a> {
     pub frames: u32,
+    pub ui: Option<&'a str>,
+    pub size: Option<(u32, u32)>,
     pub verify_edits: bool,
     pub closeup: bool,
     pub ao_enabled: bool,
@@ -13,6 +15,8 @@ pub struct CaptureOptions<'a> {
 pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     let CaptureOptions {
         frames,
+        ui,
+        size,
         verify_edits,
         closeup,
         ao_enabled,
@@ -21,7 +25,27 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     } = options;
     let instance = wgpu::Instance::default();
     let mut renderer = pollster::block_on(Renderer::new(&instance, None))?;
-    let (width, height) = (1280_u32, 800_u32);
+    let (width, height) = size.unwrap_or((1280, 800));
+    if !(320..=7680).contains(&width) || !(240..=4320).contains(&height) {
+        return Err("Capture dimensions must be between 320x240 and 7680x4320".into());
+    }
+    let captured = match ui.unwrap_or("play") {
+        "play" => true,
+        "debug" => {
+            renderer.ui.debug = true;
+            true
+        }
+        "pause" => false,
+        "controls" => {
+            renderer.ui.panel = crate::ui::Panel::Controls;
+            false
+        }
+        "settings" => {
+            renderer.ui.panel = crate::ui::Panel::Settings;
+            false
+        }
+        _ => return Err("--ui expects play, pause, controls, settings, or debug".into()),
+    };
     let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("offscreen capture"),
         size: wgpu::Extent3d {
@@ -166,7 +190,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
             FrameInfo {
                 size: (width, height),
                 fps: 0.0,
-                captured: verify_edits,
+                captured,
                 vsync: false,
             },
         );

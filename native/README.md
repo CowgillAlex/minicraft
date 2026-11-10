@@ -1,6 +1,6 @@
-# Cedar Voxel Lab
+# MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.2.1 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.3.0 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -20,11 +20,13 @@ The Windows executable needs no separate asset files or installer. The cross-bui
 cargo run --release --locked
 ```
 
-Click to capture the mouse. WASD moves, mouse looks, Space/E flies up, Shift/Q flies down, Ctrl boosts, and the wheel adjusts speed. Esc releases the cursor. R resets the camera, H toggles the HUD, G toggles voxel boundaries, O toggles ambient occlusion, -/= move time backward/forward, V toggles VSync, and F11 toggles fullscreen. Movement is free flight without collisions.
+Choose Play or press Enter to capture the mouse. WASD moves, mouse looks, Space/E flies up, Shift/Q flies down, Ctrl boosts, and the wheel adjusts speed. Esc opens the world menu and releases the cursor. F1 opens Controls, F3 toggles debug info, R resets the camera, H hides the playing HUD, G toggles voxel boundaries, O toggles ambient occlusion, -/= move time backward/forward, V toggles VSync, and F11 toggles fullscreen. Movement is free flight without collisions.
 
 After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass. A depth-tested mint outline highlights the target within eight metres. Placement cannot occupy the camera's own cell or leave world bounds. Edits last for the current session and reset when you exit.
 
-The HUD reports FPS and average frame interval, resident solid voxels, visible triangles, visible chunk draw calls, and camera coordinates. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
+The playing HUD contains a compact bottom hotbar with isometric material previews, a crosshair, a small clock, and a selected material label. The dark Escape menu has clickable resume, settings, controls, and quit buttons. Settings control AO, VSync, voxel outlines, and time of day. Menus scale with the window and high-DPI displays. H hides the HUD for screenshots; Esc restores the menu.
+
+F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, and target data. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
 
 ## Renderer
 
@@ -35,7 +37,7 @@ The HUD reports FPS and average frame interval, resident solid voxels, visible t
 - Bilinear voxel-corner ambient occlusion, plus half-resolution screen-space ambient occlusion with a 0.55 metre radius and depth/normal-aware upsampling. AO darkens the ambient lighting contribution; emissive lamps, water reflections, direct sunlight, the target outline, and HUD are preserved. Turning AO off skips its sampling pass. Procedural surface variation, animated water highlights, sky, and distance fog complete the scene.
 - Back-to-front chunk-sorted glass rendering after the opaque lighting/AO pass. Glass transmits sunlight and has lightly tinted reflections; its depth does not incorrectly occlude interior AO.
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
-- Embedded WGSL shaders and a batched bitmap HUD. The executable needs no asset directory.
+- Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
 
 This is a rasterized mesh renderer. The generated world extent and material palette are fixed; time of day and voxel edits are interactive. There is no streaming, level of detail, persistent saves, or physics yet.
 
@@ -62,6 +64,10 @@ cargo run --release --locked -- --screenshot house.png --shadow-view house
 cargo run --release --locked -- --screenshot terrain.png --shadow-view terrain
 cargo run --release --locked -- --screenshot leaves.png --shadow-view leaves
 cargo run --release --locked -- --screenshot night.png --view street --time 21
+cargo run --release --locked -- --screenshot menu.png --ui pause
+cargo run --release --locked -- --screenshot settings.png --ui settings --size 800x600
+cargo run --release --locked -- --screenshot controls.png --ui controls
+cargo run --release --locked -- --screenshot debug.png --ui debug
 cargo run --release --locked -- --screenshot inside.png --view interior --time 21
 cargo run --release --locked -- --screenshot glass.png --view window --time 12
 ```
@@ -78,6 +84,8 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC an
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.2.1/cedar-voxel-lab-v0.2.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.3.0/minicraft-v0.3.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+
+The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the notice.
 
 The checked-in Cargo.lock pins dependencies. Generated binaries and build outputs stay outside version control.

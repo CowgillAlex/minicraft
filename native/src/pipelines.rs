@@ -149,7 +149,7 @@ impl Pipelines {
             label: Some("HUD shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("hud.wgsl").into()),
         });
-        let hud_attributes = wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x4];
+        let hud_attributes = wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x4,2=>Float32x2];
         let hud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("HUD"),
             layout: None,

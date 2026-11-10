@@ -53,6 +53,8 @@ pub struct Renderer {
     target: Option<Hit>,
     pub selected_material: u8,
     hud_buffer: wgpu::Buffer,
+    hud_font: wgpu::BindGroup,
+    pub ui: crate::ui::UiState,
     hud_count: u32,
 
     shadow_ready: bool,
@@ -208,6 +210,7 @@ impl Renderer {
             &lighting.layout,
         );
         let occlusion = Occlusion::new(&device, format, &uniform_layout);
+        let hud_font = crate::hud::font_group(&device, &queue, &pipelines.hud_pipeline)?;
         let hud_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("HUD vertices"),
             size: 2_000_000,
@@ -234,6 +237,8 @@ impl Renderer {
             target: None,
             selected_material: crate::world::STONE,
             hud_buffer,
+            hud_font,
+            ui: crate::ui::UiState::default(),
             hud_count: 0,
 
             shadow_ready: false,
@@ -478,6 +483,7 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipelines.hud_pipeline);
+            pass.set_bind_group(0, &self.hud_font, &[]);
             pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
             pass.draw(0..self.hud_count, 0..1);
         }
@@ -503,11 +509,13 @@ impl Renderer {
                 triangles: self.visible_triangles,
                 chunks: self.visible_chunks,
                 ao_enabled: self.ao_enabled,
+                grid: self.grid,
                 material: self.selected_material,
                 target: self.target,
                 time: &time,
                 lighting_pending: self.lighting.pending(),
             },
+            &self.ui,
         );
         self.hud_count = vertices.len() as u32;
         self.queue
