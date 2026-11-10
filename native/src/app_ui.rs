@@ -8,8 +8,23 @@ use winit::{
 };
 
 impl App {
+    pub(super) fn reset_player(&mut self) {
+        if let Some(renderer) = &self.renderer {
+            self.simulation.reset(renderer.world());
+            let position = self.simulation.eye_position();
+            let direction = (crate::world::World::meters(155, 40, 205) - position).normalize();
+            self.camera = crate::camera::Camera {
+                position,
+                yaw: direction.z.atan2(direction.x),
+                pitch: direction.y.asin(),
+                ..Default::default()
+            };
+        }
+    }
     pub(super) fn capture_cursor(&mut self, capture: bool) {
+        self.last_frame = std::time::Instant::now();
         if !capture {
+            self.simulation.clear_input();
             if let Some(renderer) = &mut self.renderer {
                 renderer.hud_enabled = true;
             }

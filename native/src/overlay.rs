@@ -61,7 +61,11 @@ pub fn vertices(
         [0.85, 0.89, 0.86, 0.8],
     );
     if layout.width >= 1100.0 {
-        let speed = format!("Free flight   {:.1} m/s", camera.speed);
+        let speed = format!(
+            "{}   {:.1} m/s",
+            if ui.flying { "Fly" } else { "Walk" },
+            camera.speed
+        );
         let speed_x = layout.width - 24.0 - Hud::text_width(&speed, 13.0, false);
         hud.text(&speed, speed_x + 1.0, layout.height - 37.0, 13.0, shadow);
         hud.text(
@@ -94,7 +98,7 @@ pub fn vertices(
         }
     }
     if ui.debug && captured {
-        debug(&mut hud, camera, &stats, fps, vsync);
+        debug(&mut hud, camera, &stats, fps, vsync, ui);
     }
     if !captured {
         crate::ui_menu::draw(&mut hud, &layout, ui, &stats, vsync);
@@ -174,9 +178,27 @@ fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
         );
     }
 }
-fn debug(hud: &mut Hud, camera: &Camera, stats: &OverlayStats<'_>, fps: f32, vsync: bool) {
+fn debug(
+    hud: &mut Hud,
+    camera: &Camera,
+    stats: &OverlayStats<'_>,
+    fps: f32,
+    vsync: bool,
+    ui: &UiState,
+) {
     let rows = [
         format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")),
+        format!(
+            "20 TPS / tick {} / {}",
+            ui.ticks,
+            if ui.grounded {
+                "grounded"
+            } else if ui.flying {
+                "flying"
+            } else {
+                "airborne"
+            }
+        ),
         format!(
             "{fps:.0} FPS  /  {:.1} ms",
             if fps > 0.0 { 1000.0 / fps } else { 0.0 }
@@ -202,7 +224,7 @@ fn debug(hud: &mut Hud, camera: &Camera, stats: &OverlayStats<'_>, fps: f32, vsy
             x: 20.0,
             y: 60.0,
             w: 320.0,
-            h: 190.0,
+            h: 214.0,
         },
         10.0,
         [0.025, 0.035, 0.04, 0.9],

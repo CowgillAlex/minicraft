@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.3.0 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.4.0 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -20,13 +20,13 @@ The Windows executable needs no separate asset files or installer. The cross-bui
 cargo run --release --locked
 ```
 
-Choose Play or press Enter to capture the mouse. WASD moves, mouse looks, Space/E flies up, Shift/Q flies down, Ctrl boosts, and the wheel adjusts speed. Esc opens the world menu and releases the cursor. F1 opens Controls, F3 toggles debug info, R resets the camera, H hides the playing HUD, G toggles voxel boundaries, O toggles ambient occlusion, -/= move time backward/forward, V toggles VSync, and F11 toggles fullscreen. Movement is free flight without collisions.
+Choose Play or press Enter to capture the mouse. WASD moves, mouse looks, Space/E jumps, Shift/Q slows walking, Ctrl sprints, and the wheel adjusts speed. F toggles flight; Space/E flies up and Shift/Q flies down while flying. Esc opens the world menu and releases the cursor. F1 opens Controls, F3 toggles debug info, R returns to a clear spawn position, H hides the playing HUD, G toggles voxel boundaries, O toggles ambient occlusion, -/= move time backward/forward, V toggles VSync, and F11 toggles fullscreen. Walking has gravity. Both walking and flight collide with the fine voxel geometry.
 
-After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass. A depth-tested mint outline highlights the target within eight metres. Placement cannot occupy the camera's own cell or leave world bounds. Edits last for the current session and reset when you exit.
+After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass. A depth-tested mint outline highlights the target within eight metres. Placement cannot overlap the player body at its simulated or interpolated position, or leave world bounds. Edits last for the current session and reset when you exit.
 
 The playing HUD contains a compact bottom hotbar with isometric material previews, a crosshair, a small clock, and a selected material label. The dark Escape menu has clickable resume, settings, controls, and quit buttons. Settings control AO, VSync, voxel outlines, and time of day. Menus scale with the window and high-DPI displays. H hides the HUD for screenshots; Esc restores the menu.
 
-F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, and target data. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
+F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, target data, and the 20 TPS tick count/grounded state. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
 
 ## Renderer
 
@@ -39,7 +39,17 @@ F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordin
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
 - Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
 
-This is a rasterized mesh renderer. The generated world extent and material palette are fixed; time of day and voxel edits are interactive. There is no streaming, level of detail, persistent saves, or physics yet.
+This is a rasterized mesh renderer. The generated world extent and material palette are fixed; time of day and voxel edits are interactive. There is no streaming, level of detail, persistent saves, AI, or car simulation yet.
+
+## Player physics
+
+The player uses a 0.6 × 1.8 metre AABB with a 1.62 metre eye height. A swept broad phase gathers only intersecting fine voxels. Motion clips against each voxel on Y, X, and Z, preserving wall sliding and preventing fast movement from skipping a one-voxel wall. Glass is solid; water and flowers are non-solid. Grounded movement can step up 0.5 metres when headroom permits. World edges and the bottom are solid. Placement checks the whole body, and resetting searches for a clear spawn if it has been edited.
+
+Physics runs at exactly 20 fixed steps per simulated second. The accumulator uses real frame elapsed time, with at most 250 ms of catch-up after a stall. Rendering blends the previous and current completed tick using the remaining accumulator fraction. Previous state changes only on a tick, including when a frame needs several ticks. Positions have the standard one-tick interpolation delay, while mouse orientation updates immediately at render frequency. Menus freeze simulation; resuming does not accumulate paused time. Teleports discard old interpolation state, and flight toggles preserve the rendered position. Short jump taps are queued until the next tick.
+
+Walking uses acceleration, gravity of 24 m/s², a 48 m/s terminal fall speed, and an 8.4 m/s jump impulse. Ctrl sprints, Shift slows walking, and F toggles flight with collisions. Space/Shift moves vertically in flight and Ctrl boosts it. Water currently has no swimming/buoyancy simulation. Collision boxes are resolved against individual 6.25 cm voxels; they are not snapped to metre-sized blocks.
+
+Alex's [Paper-Minecraft AABB](https://github.com/CowgillAlex/Paper-Minecraft/blob/main/core/src/main/java/dev/alexco/minecraft/phys/AABB.java) informed the swept-box/per-axis clipping approach. The full reference repository is cloned at `/home/alexc/.t3/projects/Paper-Minecraft` for future work. MiniCraft's collision implementation is three-dimensional and its fixed-step interpolation is separate from that reference.
 
 ## Lighting
 
@@ -76,7 +86,7 @@ cargo run --release --locked -- --screenshot inside.png --view interior --time 2
 cargo run --release --locked -- --screenshot glass.png --view window --time 12
 ```
 
-A separate GPU test compares open and roof-shaded water at noon and night.
+Physics tests cover landing stability, jumping/head collisions, thin-wall sweeps, sliding, steps/headroom, water/glass collision rules, world bounds, placement protection, flight controls, and equivalent simulation/interpolation at 10, 30, 60 and 144 FPS. A separate GPU test compares open and roof-shaded water at noon and night.
 
 Lighting tests compare incremental edits and partial texture uploads byte-for-byte with fresh full bakes, including lamp removal, overlapping sources, windows, roofs, and coalesced edits. The opt-in lighting benchmark reports initial bake time, edit latency, and uploaded bytes in the generated world.
 
@@ -90,7 +100,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC an
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.3.0/minicraft-v0.3.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.4.0/minicraft-v0.4.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the notice.
 

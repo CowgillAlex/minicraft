@@ -249,16 +249,20 @@ impl Renderer {
             grid: false,
         })
     }
-    pub fn edit(&mut self, camera: &Camera, place: bool) -> bool {
-        let Some(hit) = editing::raycast(
+    pub fn world(&self) -> &World {
+        &self.scene.world
+    }
+    pub fn target_cell(&self, camera: &Camera, place: bool) -> Option<[i32; 3]> {
+        let hit = editing::raycast(
             &self.scene.world,
             camera.position,
             camera.direction(),
             editing::REACH,
-        ) else {
-            return false;
-        };
-        let Some(cell) = editing::edit_cell(hit, camera.position, place) else {
+        )?;
+        editing::edit_cell(hit, camera.position, place)
+    }
+    pub fn edit(&mut self, camera: &Camera, place: bool) -> bool {
+        let Some(cell) = self.target_cell(camera, place) else {
             return false;
         };
         let material = if place {

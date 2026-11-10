@@ -1,7 +1,7 @@
-MINICRAFT v0.3.0
+MINICRAFT v0.4.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.3.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.4.0-windows-x64.exe. No installer or extra asset files.
 The world and lighting take a few seconds to generate when starting.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
@@ -14,13 +14,14 @@ CONTROLS
 Play / Back to world / Enter: capture mouse
 WASD: move horizontally
 Mouse: look
-Space / E: fly up
-Shift / Q: fly down
-Ctrl: move faster
+Space / E: jump (fly up in flight mode)
+Shift / Q: slow walk (fly down in flight mode)
+Ctrl: sprint / flight boost
+F: toggle walking / flight, both with collisions
 Scroll: change movement speed
 Esc: world menu / back
 - / =: move time backward / forward. Hold to advance faster.
-R: reset camera
+R: return to a clear spawn
 F1: controls
 F3: debug info
 H: hide/show playing HUD
@@ -45,6 +46,8 @@ has a subtle tint and sky reflection, and does not cast an opaque sun shadow.
 Changing time moves the sun, changes shadows and sky colour, and brings out
 warm light pools at dusk and night. The HUD displays the current time.
 Try approximately 18:30-21:00 for the strongest warm/cool contrast.
+Water receives sunlight/moonlight shadows and sky occlusion. Wave highlights
+use actual light instead of adding a bright unlit ripple pattern.
 
 Lighting repairs only affected light paths after edits and uploads only the
 changed region. Completed updates appear while editing continues, without
@@ -58,7 +61,13 @@ not a separate ray-traced point shadow for every lamp.
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
 The finite 40 x 40 metre scene has terrain, cabins, roads, trees and a pond.
-Free flight has no collisions. This version has no car physics or AI.
+Walking has gravity, jumping, wall sliding and half-metre step-up. Both
+walking and flight collide with individual fine voxels, including glass.
+Water and flowers do not collide; swimming is not simulated yet.
+Physics ticks at 20 TPS; rendering interpolates positions between ticks
+and mouse look remains immediate. Menus freeze physics. Blocks cannot be
+placed inside your body. World edges and the bottom are solid.
+This version has no car physics or AI.
 
 ERRORS
 Startup errors write minicraft-error.txt beside the executable and display

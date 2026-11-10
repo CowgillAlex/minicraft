@@ -12,10 +12,12 @@ mod light_volume;
 mod mesh;
 mod occlusion;
 mod overlay;
+mod physics;
 mod pipelines;
 mod ray;
 mod renderer;
 mod scene_mesh;
+mod simulation;
 mod ui;
 mod ui_icons;
 mod ui_menu;
@@ -40,6 +42,7 @@ struct App {
     renderer: Option<Renderer>,
     config: Option<wgpu::SurfaceConfiguration>,
     camera: Camera,
+    simulation: simulation::Simulation,
     keys: HashSet<KeyCode>,
     captured: bool,
     occluded: bool,
@@ -59,6 +62,7 @@ impl App {
             renderer: None,
             config: None,
             camera: Camera::default(),
+            simulation: simulation::Simulation::default(),
             keys: HashSet::new(),
             captured: false,
             occluded: false,
@@ -89,16 +93,26 @@ impl App {
     }
     fn draw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
+        let dt = now.duration_since(self.last_frame).as_secs_f64();
         self.last_frame = now;
         if self.captured {
-            self.camera.update(&self.keys, dt);
+            if let Some(renderer) = &self.renderer {
+                self.simulation.advance(
+                    renderer.world(),
+                    physics::Input::from_keys(&self.keys, self.camera.yaw, self.camera.speed),
+                    dt,
+                );
+            }
         }
+        self.camera.position = self.simulation.eye_position();
         let (Some(surface), Some(renderer), Some(config)) =
             (&self.surface, &mut self.renderer, &self.config)
         else {
             return;
         };
+        renderer.ui.flying = self.simulation.player.mode == physics::Mode::Fly;
+        renderer.ui.grounded = self.simulation.player.grounded;
+        renderer.ui.ticks = self.simulation.ticks;
         let frame = match surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -168,6 +182,7 @@ impl ApplicationHandler for App {
             self.window = Some(window);
             self.surface = Some(surface);
             self.renderer = Some(renderer);
+            self.reset_player();
             self.last_frame = Instant::now();
             self.stats_since = Instant::now();
             Ok(())
@@ -202,7 +217,12 @@ impl ApplicationHandler for App {
                             renderer.edit(&self.camera, false);
                         }
                         MouseButton::Right => {
-                            renderer.edit(&self.camera, true);
+                            if renderer
+                                .target_cell(&self.camera, true)
+                                .is_some_and(|cell| !self.simulation.blocks_placement(cell))
+                            {
+                                renderer.edit(&self.camera, true);
+                            }
                         }
                         MouseButton::Middle => renderer.pick_material(&self.camera),
                         _ => {}
@@ -240,6 +260,9 @@ impl ApplicationHandler for App {
                     if event.repeat {
                         return;
                     }
+                    if self.captured && key == KeyCode::Space {
+                        self.simulation.queue_jump();
+                    }
                     if self.handle_ui_key(key) {
                         return;
                     }
@@ -275,7 +298,8 @@ impl ApplicationHandler for App {
                                 renderer.selected_material = crate::world::GLASS;
                             }
                         }
-                        KeyCode::KeyR => self.camera = Camera::default(),
+                        KeyCode::KeyR => self.reset_player(),
+                        KeyCode::KeyF if self.captured => self.simulation.toggle_flight(),
                         KeyCode::KeyO => {
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.ao_enabled = !renderer.ao_enabled;

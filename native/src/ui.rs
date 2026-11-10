@@ -13,6 +13,9 @@ pub struct UiState {
     pub pointer: [f32; 2],
     pub debug: bool,
     pub played: bool,
+    pub flying: bool,
+    pub grounded: bool,
+    pub ticks: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {

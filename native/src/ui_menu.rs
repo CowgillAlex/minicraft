@@ -44,7 +44,8 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             let rows = [
                 ("W A S D", "Move"),
                 ("Mouse", "Look around"),
-                ("Space / Shift", "Fly up / down"),
+                ("Space / Shift", "Jump / slow walk"),
+                ("F / Space / Shift", "Toggle flight / up / down"),
                 ("Ctrl / Scroll", "Boost / adjust speed"),
                 ("Left / Right click", "Break / place a voxel"),
                 ("Middle click", "Pick material"),
@@ -55,7 +56,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("R / Esc", "Reset view / world menu"),
             ];
             for (i, (key, description)) in rows.iter().enumerate() {
-                let y = p.y + 76.0 + i as f32 * 28.0;
+                let y = p.y + 76.0 + i as f32 * 26.0;
                 hud.text(key, p.x + 28.0, y, 14.0, ACCENT);
                 hud.text(description, p.x + 224.0, y, 14.0, TEXT);
             }

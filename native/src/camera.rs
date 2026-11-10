@@ -1,6 +1,4 @@
 use glam::{Mat4, Vec3, Vec4};
-use std::collections::HashSet;
-use winit::keyboard::KeyCode;
 
 pub struct Camera {
     pub position: Vec3,
@@ -36,34 +34,6 @@ impl Camera {
         self.yaw += dx as f32 * 0.002;
         self.pitch = (self.pitch - dy as f32 * 0.002).clamp(-1.54, 1.54);
     }
-    pub fn update(&mut self, keys: &HashSet<KeyCode>, dt: f32) {
-        let forward = Vec3::new(self.yaw.cos(), 0.0, self.yaw.sin());
-        let right = forward.cross(Vec3::Y);
-        let mut movement = Vec3::ZERO;
-        for (key, direction) in [
-            (KeyCode::KeyW, forward),
-            (KeyCode::KeyS, -forward),
-            (KeyCode::KeyD, right),
-            (KeyCode::KeyA, -right),
-            (KeyCode::Space, Vec3::Y),
-            (KeyCode::ShiftLeft, -Vec3::Y),
-            (KeyCode::ShiftRight, -Vec3::Y),
-            (KeyCode::KeyQ, -Vec3::Y),
-            (KeyCode::KeyE, Vec3::Y),
-        ] {
-            if keys.contains(&key) {
-                movement += direction;
-            }
-        }
-        self.position += movement.normalize_or_zero()
-            * self.speed
-            * dt
-            * if keys.contains(&KeyCode::ControlLeft) || keys.contains(&KeyCode::ControlRight) {
-                3.0
-            } else {
-                1.0
-            };
-    }
 }
 pub struct Frustum([Vec4; 6]);
 impl Frustum {
@@ -96,27 +66,5 @@ mod tests {
         assert!(f.contains_sphere(Vec3::new(0.0, 0.0, -3.0), 0.2));
         assert!(!f.contains_sphere(Vec3::new(0.0, 0.0, 3.0), 0.2));
         assert!(!f.contains_sphere(Vec3::new(100.0, 0.0, -3.0), 0.2));
-    }
-}
-
-#[cfg(test)]
-mod control_tests {
-    use super::*;
-    #[test]
-    fn shift_descends_and_control_boosts() {
-        for shift in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
-            let mut camera = Camera::default();
-            let start = camera.position;
-            camera.update(&HashSet::from([shift]), 1.0);
-            assert!((camera.position.y - start.y + camera.speed).abs() < 0.001);
-            assert!((camera.position.x - start.x).abs() < 0.001);
-        }
-        for control in [KeyCode::ControlLeft, KeyCode::ControlRight] {
-            let mut camera = Camera::default();
-            let start = camera.position;
-            camera.update(&HashSet::from([KeyCode::KeyW, control]), 1.0);
-            assert!((camera.position.distance(start) - camera.speed * 3.0).abs() < 0.001);
-            assert_eq!(camera.position.y, start.y);
-        }
     }
 }
