@@ -48,7 +48,7 @@ fn loss(material: u8) -> u8 {
     match material {
         world::AIR | world::LIGHT => 0,
         world::GLASS => 3,
-        world::WATER => 6,
+        world::WATER => 1,
         _ => BLOCKED,
     }
 }

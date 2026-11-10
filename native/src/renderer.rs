@@ -12,7 +12,7 @@ use crate::{
 };
 use bytemuck::{Pod, Zeroable};
 
-use std::{error::Error, time::Instant};
+use std::{error::Error, sync::Arc, time::Instant};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -36,12 +36,13 @@ pub struct FrameInfo {
 }
 
 pub struct Renderer {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
     pub adapter_name: String,
     pub format: wgpu::TextureFormat,
     pipelines: Pipelines,
     occlusion: Occlusion,
+    water: crate::water::WaterDepth,
     pub ao_enabled: bool,
     shadow_debug: bool,
     uniform: wgpu::Buffer,
@@ -74,49 +75,42 @@ impl Renderer {
         surface: Option<&wgpu::Surface<'_>>,
         source: crate::worldgen::preview::Scene,
     ) -> Result<Self> {
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: surface,
-                force_fallback_adapter: false,
-            })
-            .await
-            .ok_or("No compatible GPU found. Update your graphics driver.")?;
-        let format = surface
-            .map(|s| {
-                let caps = s.get_capabilities(&adapter);
-                caps.formats
-                    .iter()
-                    .copied()
-                    .find(|f| f.is_srgb())
-                    .unwrap_or(caps.formats[0])
-            })
-            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
-        let info = adapter.get_info();
-        let adapter_name = format!("{} / {:?}", info.name, info.backend);
-        println!("GPU: {adapter_name}");
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("voxel device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                },
-                None,
-            )
-            .await?;
+        let gpu = crate::gpu::Gpu::new(instance, surface).await?;
+        Self::from_gpu(gpu, source, &crate::startup::Progress::default())
+    }
+    pub fn from_gpu(
+        gpu: crate::gpu::Gpu,
+        source: crate::worldgen::preview::Scene,
+        progress: &crate::startup::Progress,
+    ) -> Result<Self> {
+        let crate::gpu::Gpu {
+            device,
+            queue,
+            format,
+            adapter_name,
+        } = gpu;
+        progress.check()?;
+        progress.begin(crate::startup::Stage::Terrain, 0);
         let start = Instant::now();
         println!("Generating 6.25 cm voxel world...");
-        let world = source.build()?;
+        let world = source.build_with_progress(progress)?;
         let voxel_count = world.voxels;
         println!(
             "{} voxels generated in {:.2}s. Meshing...",
             voxel_count,
             start.elapsed().as_secs_f32()
         );
-        let scene = SceneMesh::new(&device, world);
+        progress.begin(
+            crate::startup::Stage::Mesh,
+            crate::world::NX * crate::world::NY * crate::world::NZ,
+        );
+        let scene = SceneMesh::new_with_progress(&device, world, progress)?;
         println!("World meshed in {:.2}s", start.elapsed().as_secs_f32());
+        progress.check()?;
+        progress.begin(crate::startup::Stage::Lighting, 0);
         let lighting = LightVolume::new(&device, &queue, &scene.world);
+        progress.check()?;
+        progress.begin(crate::startup::Stage::Preparing, 0);
         let selection = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("target voxel outline"),
             size: 24 * 12,
@@ -207,12 +201,14 @@ impl Renderer {
                 },
             ],
         });
+        let water = crate::water::WaterDepth::new(&device);
         let pipelines = Pipelines::new(
             &device,
             format,
             &uniform_layout,
             &shadow_layout,
             &lighting.layout,
+            &water.layout,
         );
         let occlusion = Occlusion::new(&device, format, &uniform_layout);
         let hud_font = crate::hud::font_group(&device, &queue, &pipelines.hud_pipeline)?;
@@ -222,6 +218,8 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        progress.check()?;
+        progress.begin(crate::startup::Stage::Ready, 0);
         Ok(Self {
             device,
             queue,
@@ -229,6 +227,7 @@ impl Renderer {
             format,
             pipelines,
             occlusion,
+            water,
             ao_enabled: true,
             shadow_debug: false,
             uniform,
@@ -315,6 +314,8 @@ impl Renderer {
         self.occlusion
             .resize(&self.device, self.format, (width, height));
         let targets = self.occlusion.targets.as_ref().expect("sized AO targets");
+        self.water
+            .resize(&self.device, &targets.depth, (width, height));
         let matrix = camera.matrix(width as f32 / height as f32);
         let (sun, power, color, daylight) = self.daylight.parameters();
         let light_matrix = Daylight::light_matrix(sun);
@@ -430,7 +431,7 @@ impl Renderer {
             .render(&mut encoder, view, &self.uniform_group, self.ao_enabled);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("transparent glass"),
+                label: Some("transparent water and glass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -441,20 +442,24 @@ impl Renderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
+                    depth_ops: None,
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&self.pipelines.glass_pipeline);
+            pass.set_pipeline(&self.pipelines.transparent_pipeline);
             pass.set_bind_group(0, &self.uniform_group, &[]);
             pass.set_bind_group(1, &self.shadow_group, &[]);
             pass.set_bind_group(2, &self.lighting.group, &[]);
-            let (chunks, triangles) = self.scene.draw_glass(&mut pass, &frustum, camera.position);
+            pass.set_bind_group(
+                3,
+                self.water.group.as_ref().expect("sized water depth"),
+                &[],
+            );
+            let (chunks, triangles) =
+                self.scene
+                    .draw_transparent(&mut pass, &frustum, camera.position);
             self.visible_chunks += chunks;
             self.visible_triangles += triangles;
             for door in &self.door_meshes {

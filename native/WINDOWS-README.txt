@@ -1,8 +1,12 @@
-MINICRAFT v0.6.0
+MINICRAFT v0.7.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.6.0-windows-x64.exe. No installer or extra asset files.
-The world and lighting generate before play; noise generation uses CPU workers.
+Run minicraft-v0.7.0-windows-x64.exe. No installer or extra asset files.
+The window opens before terrain generation. A dark loading screen shows
+terrain/mesh page counts, lighting and graphics preparation, and elapsed time.
+Generation and GPU preparation run in the background. Resize, minimize or
+close the window normally; Escape cancels loading. The normal world menu
+appears when ready. Sampling cost is unchanged in this build.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
@@ -96,7 +100,11 @@ Optional launch arguments:
 --noise-sample 120.0625,63,0   Print density and material without a GPU.
 --noise-benchmark             Measure a 32-cubed voxel page without a GPU.
 
-The source aquifer keeps its original X/Y layout in this first port.
+Aquifers now use 3D seeded cells, full X/Z surface checks and 3D pressure
+barriers. Fluid regions vary along both horizontal axes instead of extruding
+the old 2D layout. Terrain density and its original metre scale are unchanged.
+Water is translucent: shallow water reveals the bottom and deeper water
+adds blue tint. Animated reflections and day/night shadows remain active.
 There are no generated surfaces, ores, buildings, trees or other features
 in the noise preview. All existing building materials remain selectable.
 Walking has gravity, jumping, wall sliding and half-metre step-up. Both

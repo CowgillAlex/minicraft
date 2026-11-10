@@ -31,7 +31,7 @@ pub const GLASS: u8 = 14;
 pub const HANDLE: u8 = 15;
 
 pub fn opaque(material: u8) -> bool {
-    material != AIR && material != GLASS
+    material != AIR && material != GLASS && material != WATER
 }
 
 #[derive(Clone)]

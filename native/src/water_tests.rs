@@ -65,3 +65,50 @@ fn water_receives_shadows_in_daylight_and_at_night() {
         );
     }
 }
+
+#[test]
+#[ignore = "requires a Vulkan/DirectX-capable GPU or software Vulkan adapter"]
+fn shallow_water_reveals_the_floor_and_depth_reduces_its_visibility() {
+    let instance = wgpu::Instance::default();
+    let mut renderer = pollster::block_on(Renderer::new(
+        &instance,
+        None,
+        crate::worldgen::preview::Scene::Village,
+    ))
+    .unwrap();
+    renderer.hud_enabled = false;
+    renderer.daylight.hours = 12.0;
+    let camera = looking_at(Vec3::new(0.0, 6.0, 0.01), Vec3::new(0.0, 49.0 / 16.0, 0.0));
+    let mut contrasts = Vec::new();
+    for bottom in [40, 8] {
+        let mut colors = Vec::new();
+        for material in [world::STONE, world::WOOD] {
+            let mut world = World::empty();
+            for x in 250..390 {
+                for z in 250..390 {
+                    world.set(x, bottom, z, material);
+                    for y in bottom + 1..=48 {
+                        world.set(x, y, z, world::WATER);
+                    }
+                }
+            }
+            renderer.lighting = LightVolume::new(&renderer.device, &renderer.queue, &world);
+            renderer.scene = SceneMesh::new(&renderer.device, world);
+            renderer.shadow_ready = false;
+            colors.push(brightness(&pixels(&mut renderer, &camera)));
+        }
+        contrasts.push((colors[0] - colors[1]).abs());
+    }
+    println!(
+        "Floor contrast through water: shallow {:.2}, deep {:.2}",
+        contrasts[0], contrasts[1]
+    );
+    assert!(
+        contrasts[0] > 15.0,
+        "shallow water must show the bottom material"
+    );
+    assert!(
+        contrasts[1] < contrasts[0] * 0.8,
+        "deeper water must attenuate the bottom"
+    );
+}

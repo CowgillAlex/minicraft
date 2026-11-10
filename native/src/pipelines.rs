@@ -1,7 +1,7 @@
-use crate::{hud::HudVertex, mesh::Vertex};
+use crate::mesh::Vertex;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub struct Pipelines {
-    pub glass_pipeline: wgpu::RenderPipeline,
+    pub transparent_pipeline: wgpu::RenderPipeline,
     pub selection_pipeline: wgpu::RenderPipeline,
     pub world_pipeline: wgpu::RenderPipeline,
     pub shadow_pipeline: wgpu::RenderPipeline,
@@ -15,6 +15,7 @@ impl Pipelines {
         uniform_layout: &wgpu::BindGroupLayout,
         shadow_layout: &wgpu::BindGroupLayout,
         lighting_layout: &wgpu::BindGroupLayout,
+        water_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("voxel shader"),
@@ -98,9 +99,14 @@ impl Pipelines {
             multisample: Default::default(),
             multiview: None,
         });
-        let glass_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("translucent glass"),
-            layout: Some(&layout),
+        let transparent_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("water and glass layout"),
+            bind_group_layouts: &[uniform_layout, shadow_layout, lighting_layout, water_layout],
+            push_constant_ranges: &[],
+        });
+        let transparent_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("translucent water and glass"),
+            layout: Some(&transparent_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_world",
@@ -109,7 +115,7 @@ impl Pipelines {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_glass",
+                entry_point: "fs_transparent",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -145,39 +151,7 @@ impl Pipelines {
             multisample: Default::default(),
             multiview: None,
         });
-        let hud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("HUD shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("hud.wgsl").into()),
-        });
-        let hud_attributes = wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x4,2=>Float32x2];
-        let hud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("HUD"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &hud_shader,
-                entry_point: "vs_hud",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<HudVertex>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &hud_attributes,
-                }],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &hud_shader,
-                entry_point: "fs_hud",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview: None,
-        });
+        let hud_pipeline = crate::hud::pipeline(device, format);
         let selection_attributes = wgpu::vertex_attr_array![0=>Float32x3];
         let selection_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("voxel selection outline"),
@@ -211,7 +185,7 @@ impl Pipelines {
             multiview: None,
         });
         Self {
-            glass_pipeline,
+            transparent_pipeline,
             selection_pipeline,
             world_pipeline,
             shadow_pipeline,

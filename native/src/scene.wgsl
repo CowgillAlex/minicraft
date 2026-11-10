@@ -119,23 +119,6 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     let luma = vec3(0.2126,0.7152,0.0722);
     var ambient_fraction = clamp(dot(ambient,luma)/max(dot(color,luma),0.00001),0.0,1.0);
     if v.material == 9.0 { color = vec3(1.0,0.78,0.55)*7.0; ambient_fraction = 0.0; }
-    if v.material == 10.0 {
-        let phase = scene.options.x;
-        let wave_normal = normalize(normal + vec3(
-            sin(v.world.x*3.1+phase*0.7)*cos(v.world.z*2.3+phase*0.3),
-            0.0,
-            cos(v.world.x*2.7-phase*0.4)*sin(v.world.z*3.7+phase*0.5)
-        )*0.035);
-        let fresnel = 0.04+0.96*pow(1.0-max(dot(-direction,wave_normal),0.0),5.0);
-        let amount = 0.12+fresnel*0.72;
-        // Reflections need sky access, and highlights must obey sun/moon shadows.
-        // Waves perturb the normal; they never add unlit, emissive brightness.
-        let reflection = sky_color(reflect(direction,wave_normal))*pow(field.y,1.35)*mix(0.25,1.0,visibility);
-        let specular = pow(max(dot(reflect(-scene.sun.xyz,wave_normal),-direction),0.0),96.0);
-        let reflected_ambient = ambient*(1.0-amount)+reflection*amount;
-        color = reflected_ambient+direct*(1.0-amount)+scene.light_color.rgb*scene.sun.w*specular*visibility*0.6;
-        ambient_fraction = clamp(dot(reflected_ambient,luma)/max(dot(color,luma),0.00001),0.0,1.0);
-    }
     if scene.options.y > 0.5 {
         let grid_pos = fract(v.world * 16.0);
         let edge = min(grid_pos, vec3(1.0) - grid_pos);
@@ -175,7 +158,8 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     return vec4(0.45, 1.0, 0.7, 1.0);
 }
 
-@fragment fn fs_glass(v: VertexOut) -> @location(0) vec4<f32> {
+@fragment fn fs_transparent(v: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if v.material == 10.0 { return shade_water(v, front); }
     let normal=normalize(v.normal);
     let view=normalize(v.world-scene.camera.xyz);
     let fresnel=pow(1.0-abs(dot(view,normal)),5.0);
@@ -186,4 +170,43 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     let edge=1.0-smoothstep(0.0,max(fwidth(border)*1.5,0.002),border);
     let alpha=0.10+fresnel*0.48+edge*0.12;
     return vec4(tonemap(color),alpha);
+}
+
+
+@group(3) @binding(0) var opaque_depth: texture_depth_2d;
+
+fn shade_water(v: VertexOut, front: bool) -> vec4<f32> {
+    let normal = select(-normalize(v.normal), normalize(v.normal), front);
+    let view = normalize(v.world - scene.camera.xyz);
+    let phase = scene.options.x;
+    let wave = normalize(normal + vec3(
+        sin(v.world.x*3.1+phase*0.7)*cos(v.world.z*2.3+phase*0.3), 0.0,
+        cos(v.world.x*2.7-phase*0.4)*sin(v.world.z*3.7+phase*0.5)
+    ) * 0.025);
+    let size = vec2<i32>(textureDimensions(opaque_depth));
+    let pixel = clamp(vec2<i32>(v.position.xy), vec2(0), size-1);
+    let depth = textureLoad(opaque_depth,pixel,0);
+    let uv = (vec2<f32>(pixel)+0.5) / vec2<f32>(size);
+    let projected = scene.inverse_view_proj * vec4(uv*vec2(2.0,-2.0)+vec2(-1.0,1.0),depth,1.0);
+    let floor_point = projected.xyz / projected.w;
+    let distance = length(v.world-scene.camera.xyz);
+    let thickness = clamp(select(distance, length(floor_point-scene.camera.xyz)-distance, front), 0.0,24.0);
+    let fresnel = 0.02 + 0.98*pow(1.0-abs(dot(view,wave)),5.0);
+    let reflected = 0.04+fresnel*0.85;
+    // Beer-Lambert attenuation: a shallow bottom stays clear; depth gradually adds tint.
+    let transmission = exp(-thickness*0.26)*(1.0-reflected);
+    let alpha = clamp(1.0-transmission,0.08,0.98);
+    let field = lighting_at(v.world,normal);
+    let visibility = shadow_visibility(v.world,normalize(v.normal));
+    let sky = mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x)*pow(field.y,1.35);
+    let lamp = vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
+    let sunlight = scene.light_color.rgb*scene.sun.w*max(dot(normal,scene.sun.xyz),0.0)*visibility;
+    let tint = vec3(0.025,0.16,0.20)*(sky+lamp+sunlight);
+    let reflection = sky_color(reflect(view,wave))*pow(field.y,1.35)*mix(0.25,1.0,visibility);
+    let specular = pow(max(dot(reflect(-scene.sun.xyz,wave),-view),0.0),96.0);
+    var color = tint*(1.0-reflected/max(alpha,0.0001)) + reflection*reflected/max(alpha,0.0001);
+    color += scene.light_color.rgb*scene.sun.w*specular*visibility*0.45;
+    let fog = min(1.0-exp(-distance*distance*0.00012),0.92);
+    color = mix(color,sky_color(vec3(view.x,0.015,view.z)),fog);
+    return vec4(tonemap(max(color,vec3(0.0))),alpha);
 }

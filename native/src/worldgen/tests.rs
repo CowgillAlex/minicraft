@@ -26,13 +26,12 @@ fn seed_stream_matches_java_including_signed_extremes() {
 }
 
 #[test]
-fn original_java_slice_matches_density_and_stone_water_air() {
+fn original_java_slice_matches_density() {
     let data: Value =
         serde_json::from_str(include_str!("../../assets/worldgen/java-slice.json")).unwrap();
     let mut previous_seed = None;
     let mut generator = Generator::new(0).unwrap();
     let mut sampler = generator.sampler();
-    let mut counts = [0; 3];
     for row in data["samples"].as_array().unwrap() {
         let seed = row[0].as_i64().unwrap();
         if previous_seed != Some(seed) {
@@ -46,23 +45,7 @@ fn original_java_slice_matches_density_and_stone_water_air() {
             row[4].as_f64().unwrap(),
             &format!("seed {seed}, {p:?}"),
         );
-        let material = sampler.material(p);
-        assert_eq!(
-            material,
-            row[5].as_u64().unwrap() as u8,
-            "seed {seed}, {p:?}"
-        );
-        counts[match material {
-            STONE => 0,
-            WATER => 1,
-            AIR => 2,
-            _ => panic!("Unexpected material"),
-        }] += 1;
     }
-    assert!(
-        counts.into_iter().all(|count| count > 0),
-        "Fixtures must cover all three materials"
-    );
 }
 
 #[test]
@@ -84,11 +67,6 @@ fn fractional_and_negative_coordinates_match_java_3d_adapter() {
             sampler.density(p),
             row[4].as_f64().unwrap(),
             &format!("seed {seed}, {p:?}"),
-        );
-        assert_eq!(
-            sampler.material(p),
-            row[5].as_u64().unwrap() as u8,
-            "seed {seed}, {p:?}"
         );
     }
 }
@@ -114,4 +92,31 @@ fn generated_page_samples_at_voxel_spacing_with_the_requested_origin() {
         assert_eq!(page[x + 32 * (z + 32 * y)], independent.material(p));
     }
     assert_eq!(preview.point([1, 1, 1]), [125.0625, 60.0625, -0.9375]);
+}
+
+#[test]
+fn three_dimensional_aquifer_matches_java_reference_and_cache_order() {
+    let data: Value =
+        serde_json::from_str(include_str!("../../assets/worldgen/java-aquifer3d.json")).unwrap();
+    for seed in [0, 1, 12345, -928341, i64::MIN, i64::MAX] {
+        let generator = Generator::new(seed).unwrap();
+        let rows: Vec<_> = data["samples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row[0].as_i64() == Some(seed))
+            .collect();
+        for reverse in [false, true] {
+            let mut sampler = generator.sampler();
+            for i in 0..rows.len() {
+                let row = rows[if reverse { rows.len() - 1 - i } else { i }];
+                let p = std::array::from_fn(|axis| row[axis + 1].as_f64().unwrap());
+                assert_eq!(
+                    sampler.material(p),
+                    row[5].as_u64().unwrap() as u8,
+                    "seed {seed}, {p:?}, reversed {reverse}"
+                );
+            }
+        }
+    }
 }

@@ -191,3 +191,40 @@ pub fn font_group(
         ],
     }))
 }
+
+/// UI-only pipeline, also used before the world renderer is ready.
+pub fn pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let hud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("HUD shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("hud.wgsl").into()),
+    });
+    let hud_attributes = wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x4,2=>Float32x2];
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("HUD"),
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &hud_shader,
+            entry_point: "vs_hud",
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<HudVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &hud_attributes,
+            }],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &hud_shader,
+            entry_point: "fs_hud",
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview: None,
+    })
+}

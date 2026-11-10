@@ -10,9 +10,9 @@ use wgpu::util::DeviceExt;
 struct GpuChunk {
     vertices: wgpu::Buffer,
     indices: Option<wgpu::Buffer>,
-    glass: Option<wgpu::Buffer>,
+    transparent: Option<wgpu::Buffer>,
     count: u32,
-    glass_count: u32,
+    transparent_count: u32,
     center: Vec3,
 }
 /// Static shared buffers plus small replacement buffers for edited chunks.
@@ -20,25 +20,34 @@ pub struct SceneMesh {
     pub world: World,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    glass: Option<wgpu::Buffer>,
+    transparent: Option<wgpu::Buffer>,
     count: u32,
     batches: Vec<Batch>,
-    glass_batches: Vec<Batch>,
+    transparent_batches: Vec<Batch>,
     replacements: HashMap<[i32; 3], Option<GpuChunk>>,
 }
 impl SceneMesh {
+    #[cfg(test)]
     pub fn new(device: &wgpu::Device, world: World) -> Self {
-        let mut mesh = Mesh::build(&world);
+        Self::new_with_progress(device, world, &crate::startup::Progress::default())
+            .expect("Uncancelled scene upload")
+    }
+    pub fn new_with_progress(
+        device: &wgpu::Device,
+        world: World,
+        progress: &crate::startup::Progress,
+    ) -> Result<Self, String> {
+        let mut mesh = Mesh::build_with_progress(&world, progress)?;
         if world.noise_preview.is_none() {
             mesh.add_horizon();
         }
         println!(
-            "{} opaque / {} glass triangles in {} chunks",
+            "{} opaque / {} transparent triangles in {} chunks",
             mesh.indices.len() / 3,
-            mesh.glass_indices.len() / 3,
+            mesh.transparent_indices.len() / 3,
             mesh.batches.len()
         );
-        Self {
+        Ok(Self {
             world,
             vertices: buffer(
                 device,
@@ -52,12 +61,12 @@ impl SceneMesh {
                 bytemuck::cast_slice(&mesh.indices),
                 wgpu::BufferUsages::INDEX,
             ),
-            glass: optional_indices(device, &mesh.glass_indices),
+            transparent: optional_indices(device, &mesh.transparent_indices),
             count: mesh.indices.len() as u32,
             batches: mesh.batches,
-            glass_batches: mesh.glass_batches,
+            transparent_batches: mesh.transparent_batches,
             replacements: HashMap::new(),
-        }
+        })
     }
     pub fn edit(
         &mut self,
@@ -73,7 +82,7 @@ impl SceneMesh {
             .collect();
         for chunk in chunks {
             let mesh = Mesh::build_chunk(&self.world, chunk);
-            let replacement = if mesh.indices.is_empty() && mesh.glass_indices.is_empty() {
+            let replacement = if mesh.indices.is_empty() && mesh.transparent_indices.is_empty() {
                 None
             } else {
                 Some(GpuChunk {
@@ -84,9 +93,9 @@ impl SceneMesh {
                         wgpu::BufferUsages::VERTEX,
                     ),
                     indices: optional_indices(device, &mesh.indices),
-                    glass: optional_indices(device, &mesh.glass_indices),
+                    transparent: optional_indices(device, &mesh.transparent_indices),
                     count: mesh.indices.len() as u32,
-                    glass_count: mesh.glass_indices.len() as u32,
+                    transparent_count: mesh.transparent_indices.len() as u32,
                     center: World::meters(
                         chunk[0] * CHUNK as i32 + 16,
                         chunk[1] * CHUNK as i32 + 16,
@@ -136,15 +145,15 @@ impl SceneMesh {
         }
         stats
     }
-    pub fn draw_glass<'a>(
+    pub fn draw_transparent<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         frustum: &Frustum,
         camera: Vec3,
     ) -> (usize, usize) {
         let mut draws = Vec::new();
-        if let Some(indices) = &self.glass {
-            for batch in &self.glass_batches {
+        if let Some(indices) = &self.transparent {
+            for batch in &self.transparent_batches {
                 if batch
                     .chunk
                     .is_some_and(|key| self.replacements.contains_key(&key))
@@ -156,9 +165,14 @@ impl SceneMesh {
             }
         }
         for chunk in self.replacements.values().flatten() {
-            if let Some(indices) = &chunk.glass {
+            if let Some(indices) = &chunk.transparent {
                 if frustum.contains_sphere(chunk.center, 3.0_f32.sqrt()) {
-                    draws.push((&chunk.vertices, indices, 0..chunk.glass_count, chunk.center));
+                    draws.push((
+                        &chunk.vertices,
+                        indices,
+                        0..chunk.transparent_count,
+                        chunk.center,
+                    ));
                 }
             }
         }

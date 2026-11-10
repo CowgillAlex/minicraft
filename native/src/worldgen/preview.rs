@@ -79,9 +79,10 @@ impl Scene {
         }
     }
 
-    pub fn build(self) -> Result<World, String> {
+    pub fn build_with_progress(self, progress: &crate::startup::Progress) -> Result<World, String> {
+        progress.check()?;
         match self {
-            Self::Noise(preview) => preview.build(),
+            Self::Noise(preview) => preview.build_with_progress(progress),
             Self::Village => Ok(World::generate()),
         }
     }
@@ -92,7 +93,12 @@ impl Preview {
         std::array::from_fn(|i| f64::from(self.origin[i]) + f64::from(cell[i]) / 16.0)
     }
 
-    pub fn build(self) -> Result<World, String> {
+    pub fn build_with_progress(self, progress: &crate::startup::Progress) -> Result<World, String> {
+        progress.check()?;
+        progress.begin(
+            crate::startup::Stage::Terrain,
+            world::NX * world::NY * world::NZ,
+        );
         let generator = Generator::new(self.seed)?;
         let workers = thread::available_parallelism()
             .map_or(1, usize::from)
@@ -114,6 +120,9 @@ impl Preview {
                 scope.spawn(move || {
                     let mut sampler = generator.sampler();
                     loop {
+                        if progress.check().is_err() {
+                            break;
+                        }
                         let index = next.fetch_add(1, Ordering::Relaxed);
                         if index >= world::NX * world::NY * world::NZ {
                             break;
@@ -132,10 +141,16 @@ impl Preview {
                 });
             }
             drop(sender);
-            for (chunk, data) in receiver {
+            for (chunk, data) in &receiver {
+                if progress.check().is_err() {
+                    break;
+                }
                 world.insert_chunk(chunk, data);
+                progress.advance();
             }
+            drop(receiver);
         });
+        progress.check()?;
         Ok(world)
     }
 

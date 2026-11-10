@@ -14,9 +14,9 @@ pub struct DoorGpu {
     transformed: Vec<Vertex>,
     vertices: wgpu::Buffer,
     opaque: wgpu::Buffer,
-    glass: wgpu::Buffer,
+    transparent: wgpu::Buffer,
     count: u32,
-    glass_count: u32,
+    transparent_count: u32,
     revision: u64,
     target: f32,
     start: f32,
@@ -56,9 +56,14 @@ impl DoorGpu {
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             ),
             opaque: buffer(device, "empty door indices", &[], wgpu::BufferUsages::INDEX),
-            glass: buffer(device, "empty door glass", &[], wgpu::BufferUsages::INDEX),
+            transparent: buffer(
+                device,
+                "empty door transparent",
+                &[],
+                wgpu::BufferUsages::INDEX,
+            ),
             count: 0,
-            glass_count: 0,
+            transparent_count: 0,
             revision: door.revision,
             target: door.angle(),
             start: door.angle(),
@@ -96,14 +101,14 @@ impl DoorGpu {
             bytemuck::cast_slice(&mesh.indices),
             wgpu::BufferUsages::INDEX,
         );
-        self.glass = buffer(
+        self.transparent = buffer(
             device,
-            "door glass faces",
-            bytemuck::cast_slice(&mesh.glass_indices),
+            "door transparent faces",
+            bytemuck::cast_slice(&mesh.transparent_indices),
             wgpu::BufferUsages::INDEX,
         );
         self.count = mesh.indices.len() as u32;
-        self.glass_count = mesh.glass_indices.len() as u32;
+        self.transparent_count = mesh.transparent_indices.len() as u32;
         self.revision = door.revision;
     }
     pub fn angle(&self, now: Instant) -> f32 {
@@ -147,16 +152,20 @@ impl DoorGpu {
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         frustum: Option<&Frustum>,
-        glass: bool,
+        transparent: bool,
     ) -> usize {
-        let count = if glass { self.glass_count } else { self.count };
+        let count = if transparent {
+            self.transparent_count
+        } else {
+            self.count
+        };
         if count == 0 || frustum.is_some_and(|f| !f.contains_sphere(self.center, 1.5)) {
             return 0;
         }
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(
-            if glass {
-                self.glass.slice(..)
+            if transparent {
+                self.transparent.slice(..)
             } else {
                 self.opaque.slice(..)
             },

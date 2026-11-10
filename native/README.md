@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.6.0 opens a finite 40 × 12 × 40 metre noise preview containing only stone, water, and air. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.7.0 opens a finite 40 × 12 × 40 metre noise preview containing only stone, water, and air. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -28,11 +28,19 @@ The playing HUD contains a compact bottom hotbar with isometric material preview
 
 F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, target data, and the 20 TPS tick count/grounded state. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
 
+## Startup
+
+The desktop window opens before world generation. A compact dark loading screen shows the current stage, completed/total pages for terrain and meshing, and elapsed time. It redraws at up to 30 FPS during loading. Graphics-device creation, noise generation, meshing, initial lighting, shader compilation and GPU uploads run on a background startup thread. The loading screen and finished renderer share one graphics device; terrain is never built on the window event loop.
+
+The window remains resizable and can be minimized or closed during loading. Escape cancels startup. Cancellation stops noise workers and meshing between pages, drops queued results and never joins the startup thread on the UI path. CPU generation still uses bounded worker/result queues. Progress uses one shared snapshot instead of queuing an event for every page. A worker failure follows the normal startup-error reporting path rather than leaving the progress screen running indefinitely.
+
+After loading, the normal world menu appears. Physics remains paused until Play, and its interpolation clock starts fresh. Headless screenshot commands still wait for the complete world so their captures remain deterministic. This change makes startup responsive; it does not reduce the number of samples, alter terrain/aquifer behavior, or add chunk streaming during play.
+
 ## Noise preview
 
-The default scene ports the terrain density and aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates only stone, water and air. There are no surface layers, biomes applied as materials, ores, structures, vegetation, or decoration. Existing editing materials and renderer effects remain available.
+The default scene ports the terrain density and extends the aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates only stone, water and air. There are no surface layers, biomes applied as materials, ores, structures, vegetation, or decoration. Existing editing materials and renderer effects remain available.
 
-One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. The aquifer deliberately retains the source's X/Y layout, including its empty lava band. It does not yet add a new 3D aquifer algorithm.
+One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. Aquifers now use full 3D cells with seed names that include X/Y/Z. The nearest fluid regions, floodedness, level spread, preliminary surface columns and pressure barriers all use Z. The original unimplemented lava band remains air.
 
 The generator uses the reference vertical range of -64 to 320 metres. The playable preview displays a **40 × 12 × 40 metre window** of that field. It does not load the full 384 metre height, stream terrain, save edits, or generate infinite worlds yet. This separates checking the port from the upcoming chunk-storage and streaming changes. Default seed 1 and origin `120,58,-20` show terrain near sea level. F3 reports reference-world coordinates; rendering and physics use local coordinates within the window.
 
@@ -50,7 +58,7 @@ cargo run --release --locked -- --scene village
 
 Startup generation uses a bounded CPU worker pool with at most eight workers and leaves two logical CPUs available when possible. Workers share an immutable graph and own their caches. Each job fills a 2 metre page at full voxel resolution; a bounded result channel limits queued page memory. Generation finishes before play. This is not yet a streaming scheduler. No extra approximation, noise substitution, or coarse upscaling is applied to the resulting voxel field.
 
-Parity tests use 1,932 density/material samples produced by the original Java implementation, plus 3,564 fractional samples from that implementation with only its coordinate/interpolation adapter changed for 3D. Fixtures cover six seeds including signed extremes, negative coordinates, cave depths, sea level and interpolation boundaries. They check density within `1e-12` and materials exactly. To regenerate them with a JDK and Gson installed:
+Density parity tests retain all 5,496 samples from the original Java implementation and its fractional 3D interpolation adapter, checked within `1e-12`. Fluid selection intentionally changes from the old 2D aquifers. Another 3,564 samples from the Java code extended to 3D check materials exactly, in both forward and reverse sampling order. Fixtures cover six seeds including signed extremes, negative coordinates, cave depths, sea level and interpolation boundaries. Focused tests also cover ocean filling, dry underground regions, pressure barriers and XYZ seed/cache behavior. To regenerate them with a JDK and Gson installed:
 
 ```sh
 python3 scripts/worldgen-reference.py /path/to/Paper-Minecraft
@@ -65,7 +73,7 @@ Source details and the adapter changes are recorded in [the worldgen asset notes
 - Shared vertex/index buffers for the generated scene, with per-chunk GPU replacements after edits and per-chunk frustum culling. Edits remesh only the touched chunk and neighbors whose faces or corner AO may change.
 - A cached 4096² directional shadow map with hardware-filtered comparison sampling. A conservative depth bias bounds the full filter footprint using geometric face normals, avoiding triangle-shaped self-shadow bands. The per-frame shadow lookup uses one filtered comparison rather than nine manual taps. The map is reused until an edit invalidates it, then refreshed on the next frame.
 - Bilinear voxel-corner ambient occlusion, plus half-resolution screen-space ambient occlusion with a 0.55 metre radius and depth/normal-aware upsampling. AO darkens the ambient lighting contribution; emissive lamps, direct sunlight, shadowed water highlights, the target outline, and HUD are preserved. Turning AO off skips its sampling pass. Procedural surface variation, animated water highlights, sky, and distance fog complete the scene.
-- Back-to-front chunk-sorted glass rendering after the opaque lighting/AO pass. Glass transmits sunlight and has lightly tinted reflections; its depth does not incorrectly occlude interior AO.
+- Back-to-front chunk-sorted water and glass rendering after the opaque lighting/AO pass. Submerged opaque faces remain meshed, and water does not cast opaque directional shadows. Water reads the opaque depth buffer while it is attached read-only, measures the distance to the floor and uses exponential attenuation for depth tinting. Shallow water reveals the bottom; deeper water becomes bluer. Fresnel reflections and animated normals preserve surface highlights. This uses the existing depth texture without an additional scene copy. Glass retains its lightly tinted reflections.
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
 - Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
 
@@ -99,7 +107,7 @@ Two light channels are cached on a 0.25 metre grid: lamp light and skylight. Vox
 
 The initial bake runs at startup. A background worker retains the connectivity graph and source values. Edits recheck only nearby connections, affected sky columns, and nearby lamp seeds. A local removal/refill flood repairs illumination, including closing windows or removing sources. Only the affected texture subvolume is uploaded. Queued edits are coalesced without losing their dirty cells, and completed patches appear in order while editing continues. Cheap copy-on-write snapshots keep geometry responsive; a LIGHT BAKE indicator reports pending work. New time-of-day values update shader parameters and invalidate sun shadows without rebuilding the diffuse light field. The sun/moon, sky, fog and exposure change with the clock. Glass sorting is per chunk; this is intended for clear window panes rather than arbitrary overlapping coloured transparent volumes.
 
-Water waves perturb reflection normals instead of adding unlit brightness. Reflections respect the sky-access field and shadow visibility; sun/moon specular highlights use the same directional shadow map. Ambient water lighting participates in contact AO, so covered water remains dark at night.
+Water is translucent, with greater attenuation over deeper floors. Skylight attenuation through water is reduced so shallow submerged geometry remains visible. Transparent sorting is per chunk rather than per triangle; overlapping glass and water can still have ordering limitations. Water waves perturb reflection normals instead of adding unlit brightness. Reflections respect the sky-access field and shadow visibility; sun/moon specular highlights use the same directional shadow map. Submerged opaque geometry retains contact AO; roof coverage and the light field keep covered water dark at night.
 
 ## Verify
 
@@ -107,7 +115,7 @@ Water waves perturb reflection normals instead of adding unlit brightness. Refle
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --release --locked shadow_receivers -- --ignored --nocapture
-cargo test --release --locked water_receives_shadows -- --ignored --nocapture
+cargo test --release --locked renderer::water_tests -- --ignored --nocapture
 cargo test --release --locked benchmark_lighting_edits -- --ignored --nocapture
 cargo run --release --locked -- --scene village --screenshot scene.png --frames 3
 cargo run --release --locked -- --scene village --screenshot edits.png --verify-edits
@@ -131,7 +139,7 @@ cargo run --release --locked -- --scene village --screenshot glass.png --view wi
 
 Door tests cover structural damage/repair, custom frame recognition, both hinge sides, all four facings, local picking during a swing, blocking closes, walkable cabin entrances, source tracking and incremental lighting equivalence. The --verify-doors capture drives the live interaction, picking, editing, mesh and light paths through opening, breaking and repairing a frame/handle, blocking a close and closing again.
 
-Physics tests cover landing stability, jumping/head collisions, thin-wall sweeps, sliding, steps/headroom, water/glass collision rules, world bounds, placement protection, flight controls, and equivalent simulation/interpolation at 10, 30, 60 and 144 FPS. A separate GPU test compares open and roof-shaded water at noon and night.
+Physics tests cover landing stability, jumping/head collisions, thin-wall sweeps, sliding, steps/headroom, water/glass collision rules, world bounds, placement protection, flight controls, and equivalent simulation/interpolation at 10, 30, 60 and 144 FPS. GPU water tests compare open and roof-shaded water at noon and night, and verify that shallow water reveals a changed bottom material more strongly than deep water.
 
 Lighting tests compare incremental edits and partial texture uploads byte-for-byte with fresh full bakes, including lamp removal, overlapping sources, windows, roofs, and coalesced edits. The opt-in lighting benchmark reports initial bake time, edit latency, and uploaded bytes in the generated world.
 
@@ -145,7 +153,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC an
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.6.0/minicraft-v0.6.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.7.0/minicraft-v0.7.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the notice.
 

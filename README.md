@@ -4,9 +4,11 @@ A native Rust voxel world explorer with 6.25 cm voxels. The default scene previe
 
 ## Windows download
 
-Version 0.6.0: [standalone executable](https://img.kryptonote.com/4ffd9cff-538e-4930-9736-f58575abc0bd.exe) or [ZIP with controls and checksum](https://img.kryptonote.com/5ec7ea65-4e27-4e6f-a2fc-8189e73ee86b.zip). Downloads require access to Alex's resource host.
+Version 0.7.0: [standalone executable](https://img.kryptonote.com/2ea1c7dc-16f2-4b0a-b9ba-88c3077222d3.exe) or [ZIP with controls and checksum](https://img.kryptonote.com/0a8f4c91-503b-44ae-a58a-05e4d75c1d8c.zip). Downloads require access to Alex's resource host.
 
-This first worldgen step displays a finite 40 × 12 × 40 metre window. The density field uses the source's -64 to 320 metre vertical range; full-height loading, infinite streaming and compressed cubic chunks are later work. `--seed` and `--origin X,Y,Z` select the preview region. Noise and material decisions are checked against 5,496 Java reference samples.
+This first worldgen step displays a finite 40 × 12 × 40 metre window. The density field uses the source's -64 to 320 metre vertical range; full-height loading, infinite streaming and compressed cubic chunks are later work. `--seed` and `--origin X,Y,Z` select the preview region. Terrain density is checked against 5,496 Java reference samples; another 3,564 samples check the 3D aquifer material decisions. Water is translucent, with depth tinting and visible shallow bottoms.
+
+The desktop opens into a responsive loading screen while terrain, meshes, lighting and graphics prepare in the background. It shows page counts and elapsed time; resize normally or press Escape to cancel. The sampling cost and terrain behavior are unchanged.
 
 ## Run from source
 

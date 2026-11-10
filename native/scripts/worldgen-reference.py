@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+sys.dont_write_bytecode = True
 import tempfile
 
 REVISION = "d681c0532d5e2628c70e6de7fad7df31f64ea705"
@@ -173,6 +174,9 @@ def main():
             java = java.replace(f"Math.floorDiv(blockCoord, {spacing})", f"(int)Math.floor(blockCoord / {spacing})")
         aquifer.write_text(java)
         run("java-continuous.json", "continuous")
+        from aquifer_reference import adapt
+        aquifer.write_text(adapt(aquifer.read_text()))
+        run("java-aquifer3d.json", "continuous")
 
 
 if __name__ == "__main__":

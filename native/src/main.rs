@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod app_startup;
 mod app_ui;
 mod bloom;
 mod camera;
@@ -8,6 +9,7 @@ mod daylight;
 mod door_gpu;
 mod doors;
 mod editing;
+mod gpu;
 mod hud;
 mod light_field;
 mod light_volume;
@@ -21,9 +23,12 @@ mod ray;
 mod renderer;
 mod scene_mesh;
 mod simulation;
+mod startup;
+mod startup_ui;
 mod ui;
 mod ui_icons;
 mod ui_menu;
+mod water;
 mod world;
 mod worldgen;
 
@@ -32,7 +37,6 @@ use renderer::{FrameInfo, Renderer};
 use std::{collections::HashSet, error::Error, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
-    dpi::PhysicalSize,
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
@@ -41,10 +45,12 @@ use winit::{
 
 struct App {
     scene: worldgen::preview::Scene,
-    instance: wgpu::Instance,
+    instance: Arc<wgpu::Instance>,
     window: Option<Arc<Window>>,
-    surface: Option<wgpu::Surface<'static>>,
+    surface: Option<Arc<wgpu::Surface<'static>>>,
     renderer: Option<Renderer>,
+    startup: Option<startup::Startup>,
+    loading: Option<startup_ui::LoadingScreen>,
     config: Option<wgpu::SurfaceConfiguration>,
     camera: Camera,
     simulation: simulation::Simulation,
@@ -62,10 +68,12 @@ impl App {
     fn new(scene: worldgen::preview::Scene) -> Self {
         Self {
             scene,
-            instance: wgpu::Instance::default(),
+            instance: Arc::new(wgpu::Instance::default()),
             window: None,
             surface: None,
             renderer: None,
+            startup: None,
+            loading: None,
             config: None,
             camera: Camera::default(),
             simulation: simulation::Simulation::default(),
@@ -80,24 +88,12 @@ impl App {
             error: None,
         }
     }
-    fn resize(&mut self, size: PhysicalSize<u32>) {
-        if size.width == 0 || size.height == 0 {
+    fn draw(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_startup(event_loop);
+        if self.renderer.is_none() {
+            self.draw_loading(event_loop);
             return;
         }
-        if let (Some(renderer), Some(surface), Some(config)) =
-            (&self.renderer, &self.surface, &mut self.config)
-        {
-            config.width = size.width;
-            config.height = size.height;
-            config.present_mode = if self.vsync {
-                wgpu::PresentMode::AutoVsync
-            } else {
-                wgpu::PresentMode::AutoNoVsync
-            };
-            surface.configure(&renderer.device, config);
-        }
-    }
-    fn draw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f64();
         self.last_frame = now;
@@ -161,47 +157,29 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let result = (|| -> renderer::Result<()> {
-            let window = Arc::new(
-                event_loop.create_window(
-                    Window::default_attributes()
-                        .with_title("MiniCraft - building world...")
-                        .with_inner_size(PhysicalSize::new(1440, 900))
-                        .with_min_inner_size(PhysicalSize::new(800, 600)),
-                )?,
-            );
-            let surface = self.instance.create_surface(window.clone())?;
-            let renderer =
-                pollster::block_on(Renderer::new(&self.instance, Some(&surface), self.scene))?;
-            let size = window.inner_size();
-            self.config = Some(wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: renderer.format,
-                width: size.width.max(1),
-                height: size.height.max(1),
-                present_mode: wgpu::PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-            });
-            surface.configure(&renderer.device, self.config.as_ref().unwrap());
-            window.set_title(&format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")));
-            self.window = Some(window);
-            self.surface = Some(surface);
-            self.renderer = Some(renderer);
-            self.reset_player();
-            self.last_frame = Instant::now();
-            self.stats_since = Instant::now();
-            Ok(())
-        })();
-        if let Err(error) = result {
-            self.error = Some(error.to_string());
-            event_loop.exit();
+        self.start_loading(event_loop);
+    }
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. })
+            && self.startup.is_some()
+            && !self.occluded
+        {
+            if let Some(window) = &self.window {
+                let size = window.inner_size();
+                if size.width > 0 && size.height > 0 {
+                    window.request_redraw();
+                }
+            }
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if let Some(startup) = &self.startup {
+                    startup.progress.cancel();
+                }
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => self.resize(size),
             WindowEvent::Focused(false) => self.capture_cursor(false),
             WindowEvent::Occluded(value) => {
@@ -248,6 +226,13 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
+                    if let Some(startup) = &self.startup {
+                        if key == KeyCode::Escape && event.state == ElementState::Pressed {
+                            startup.progress.cancel();
+                            event_loop.exit();
+                        }
+                        return;
+                    }
                     if event.state == ElementState::Released {
                         self.keys.remove(&key);
                         return;
@@ -365,7 +350,15 @@ impl ApplicationHandler for App {
             }
         }
     }
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_startup(event_loop);
+        if self.startup.is_some() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + std::time::Duration::from_millis(33),
+            ));
+            return;
+        }
+        event_loop.set_control_flow(ControlFlow::Wait);
         if !self.occluded {
             if let Some(window) = &self.window {
                 let size = window.inner_size();

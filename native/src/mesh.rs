@@ -21,9 +21,9 @@ pub struct Batch {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
-    pub glass_indices: Vec<u32>,
+    pub transparent_indices: Vec<u32>,
     pub batches: Vec<Batch>,
-    pub glass_batches: Vec<Batch>,
+    pub transparent_batches: Vec<Batch>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 struct Face {
@@ -32,22 +32,33 @@ struct Face {
 }
 
 impl Mesh {
+    #[cfg(test)]
     pub fn build(world: &World) -> Self {
+        Self::build_with_progress(world, &crate::startup::Progress::default())
+            .expect("Uncancelled mesh build")
+    }
+    pub fn build_with_progress(
+        world: &World,
+        progress: &crate::startup::Progress,
+    ) -> Result<Self, String> {
+        progress.check()?;
         let mut mesh = Self {
             vertices: Vec::new(),
             indices: Vec::new(),
-            glass_indices: Vec::new(),
+            transparent_indices: Vec::new(),
             batches: Vec::new(),
-            glass_batches: Vec::new(),
+            transparent_batches: Vec::new(),
         };
         for cy in 0..world::NY {
             for cz in 0..world::NZ {
                 for cx in 0..world::NX {
+                    progress.check()?;
                     if !world.chunk_exists(cx, cy, cz) {
+                        progress.advance();
                         continue;
                     }
                     let start = mesh.indices.len() as u32;
-                    let glass_start = mesh.glass_indices.len() as u32;
+                    let glass_start = mesh.transparent_indices.len() as u32;
                     mesh.chunk(
                         world,
                         [
@@ -69,10 +80,10 @@ impl Mesh {
                             radius: 3.0_f32.sqrt(),
                         });
                     }
-                    if mesh.glass_indices.len() as u32 > glass_start {
-                        mesh.glass_batches.push(Batch {
+                    if mesh.transparent_indices.len() as u32 > glass_start {
+                        mesh.transparent_batches.push(Batch {
                             chunk: Some([cx as i32, cy as i32, cz as i32]),
-                            indices: glass_start..mesh.glass_indices.len() as u32,
+                            indices: glass_start..mesh.transparent_indices.len() as u32,
                             center: World::meters(
                                 cx as i32 * 32 + 16,
                                 cy as i32 * 32 + 16,
@@ -81,18 +92,19 @@ impl Mesh {
                             radius: 3.0_f32.sqrt(),
                         });
                     }
+                    progress.advance();
                 }
             }
         }
-        mesh
+        Ok(mesh)
     }
     pub fn build_chunk(world: &World, chunk: [i32; 3]) -> Self {
         let mut mesh = Self {
             vertices: Vec::new(),
             indices: Vec::new(),
-            glass_indices: Vec::new(),
+            transparent_indices: Vec::new(),
             batches: Vec::new(),
-            glass_batches: Vec::new(),
+            transparent_batches: Vec::new(),
         };
         if world.chunk_exists(chunk[0] as usize, chunk[1] as usize, chunk[2] as usize) {
             mesh.chunk(world, chunk.map(|v| v * CHUNK as i32));
@@ -100,7 +112,7 @@ impl Mesh {
         mesh
     }
     pub fn add_horizon(&mut self) {
-        let start = self.indices.len() as u32;
+        let start = self.transparent_indices.len() as u32;
         let base = self.vertices.len() as u32;
         for position in [
             [-500.0, 0.0, -500.0],
@@ -117,8 +129,9 @@ impl Mesh {
                 material: WATER as f32,
             });
         }
-        self.indices.extend([0, 2, 1, 0, 3, 2].map(|i| base + i));
-        self.batches.push(Batch {
+        self.transparent_indices
+            .extend([0, 2, 1, 0, 3, 2].map(|i| base + i));
+        self.transparent_batches.push(Batch {
             chunk: None,
             indices: start..start + 6,
             center: Vec3::ZERO,
@@ -146,8 +159,11 @@ impl Mesh {
                             let mut neighbor = p;
                             neighbor[axis] += sign;
                             let other = world.get_static(neighbor[0], neighbor[1], neighbor[2]);
-                            if (material == world::GLASS && other != AIR)
-                                || (material != world::GLASS && world::opaque(other))
+                            if (material == WATER && other != AIR && other != world::GLASS)
+                                || (material == world::GLASS && other != AIR && other != WATER)
+                                || (material != world::GLASS
+                                    && material != WATER
+                                    && world::opaque(other))
                             {
                                 continue;
                             }
@@ -226,8 +242,9 @@ impl Mesh {
                             } else {
                                 [0, 2, 1, 0, 3, 2]
                             };
-                            let indices = if face.material == world::GLASS {
-                                &mut self.glass_indices
+                            let indices = if face.material == world::GLASS || face.material == WATER
+                            {
+                                &mut self.transparent_indices
                             } else {
                                 &mut self.indices
                             };
@@ -384,14 +401,40 @@ mod glass_tests {
         world.set(11, 10, 10, world::GLASS);
         let mesh = Mesh::build(&world);
         assert_eq!(mesh.indices.len(), 36);
-        assert_eq!(mesh.glass_indices.len(), 30);
+        assert_eq!(mesh.transparent_indices.len(), 30);
         assert!(mesh
-            .glass_indices
+            .transparent_indices
             .iter()
             .all(|i| mesh.vertices[*i as usize].material == world::GLASS as f32));
         assert!(mesh
             .indices
             .iter()
             .all(|i| mesh.vertices[*i as usize].material != world::GLASS as f32));
+    }
+}
+
+#[cfg(test)]
+mod water_tests {
+    use super::*;
+    #[test]
+    fn water_keeps_the_floor_visible_and_stays_out_of_opaque_shadow_geometry() {
+        let mut world = World::empty();
+        world.set(5, 5, 5, world::STONE);
+        world.set(5, 6, 5, WATER);
+        world.set(5, 7, 5, WATER);
+        let mesh = Mesh::build(&world);
+        assert!(mesh.indices.iter().any(|&i| {
+            let vertex = mesh.vertices[i as usize];
+            vertex.normal == [0.0, 1.0, 0.0] && vertex.position[1] == 6.0 / 16.0
+        }));
+        assert!(mesh
+            .indices
+            .iter()
+            .all(|&i| mesh.vertices[i as usize].material != WATER as f32));
+        assert!(!mesh.transparent_indices.is_empty());
+        assert!(mesh
+            .transparent_indices
+            .iter()
+            .all(|&i| mesh.vertices[i as usize].material == WATER as f32));
     }
 }
