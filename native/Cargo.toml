@@ -1,0 +1,22 @@
+[package]
+name = "voxel-drive"
+version = "0.1.4"
+edition = "2021"
+description = "A native voxel world explorer with 1/16-metre voxels"
+
+[dependencies]
+wgpu = "0.20.1"
+winit = "0.30"
+glam = "0.29"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.3"
+png = "0.17"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "voxel-drive"
+path = "src/main.rs"
