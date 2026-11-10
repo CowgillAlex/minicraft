@@ -21,7 +21,9 @@ pub struct Batch {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    pub glass_indices: Vec<u32>,
     pub batches: Vec<Batch>,
+    pub glass_batches: Vec<Batch>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 struct Face {
@@ -34,7 +36,9 @@ impl Mesh {
         let mut mesh = Self {
             vertices: Vec::new(),
             indices: Vec::new(),
+            glass_indices: Vec::new(),
             batches: Vec::new(),
+            glass_batches: Vec::new(),
         };
         for cy in 0..world::NY {
             for cz in 0..world::NZ {
@@ -43,6 +47,7 @@ impl Mesh {
                         continue;
                     }
                     let start = mesh.indices.len() as u32;
+                    let glass_start = mesh.glass_indices.len() as u32;
                     mesh.chunk(
                         world,
                         [
@@ -64,6 +69,18 @@ impl Mesh {
                             radius: 3.0_f32.sqrt(),
                         });
                     }
+                    if mesh.glass_indices.len() as u32 > glass_start {
+                        mesh.glass_batches.push(Batch {
+                            chunk: Some([cx as i32, cy as i32, cz as i32]),
+                            indices: glass_start..mesh.glass_indices.len() as u32,
+                            center: World::meters(
+                                cx as i32 * 32 + 16,
+                                cy as i32 * 32 + 16,
+                                cz as i32 * 32 + 16,
+                            ),
+                            radius: 3.0_f32.sqrt(),
+                        });
+                    }
                 }
             }
         }
@@ -73,7 +90,9 @@ impl Mesh {
         let mut mesh = Self {
             vertices: Vec::new(),
             indices: Vec::new(),
+            glass_indices: Vec::new(),
             batches: Vec::new(),
+            glass_batches: Vec::new(),
         };
         if world.chunk_exists(chunk[0] as usize, chunk[1] as usize, chunk[2] as usize) {
             mesh.chunk(world, chunk.map(|v| v * CHUNK as i32));
@@ -126,7 +145,10 @@ impl Mesh {
                             }
                             let mut neighbor = p;
                             neighbor[axis] += sign;
-                            if world.get(neighbor[0], neighbor[1], neighbor[2]) != AIR {
+                            let other = world.get(neighbor[0], neighbor[1], neighbor[2]);
+                            if (material == world::GLASS && other != AIR)
+                                || (material != world::GLASS && world::opaque(other))
+                            {
                                 continue;
                             }
                             let mut ao = [3; 4];
@@ -139,7 +161,7 @@ impl Mesh {
                                         q[u] += du;
                                         q[v] += dv;
                                         let m = world.get(q[0], q[1], q[2]);
-                                        m != AIR && m != WATER
+                                        world::opaque(m) && m != WATER
                                     };
                                     let s1 = sample(*a, 0);
                                     let s2 = sample(0, *b);
@@ -204,7 +226,12 @@ impl Mesh {
                             } else {
                                 [0, 2, 1, 0, 3, 2]
                             };
-                            self.indices.extend(triangles.map(|index| base + index));
+                            let indices = if face.material == world::GLASS {
+                                &mut self.glass_indices
+                            } else {
+                                &mut self.indices
+                            };
+                            indices.extend(triangles.map(|index| base + index));
                             for yy in 0..h {
                                 for xx in 0..w {
                                     mask[(i + xx + (j + yy) * n) as usize] = Face::default();
@@ -344,5 +371,27 @@ mod occlusion_tests {
             }
         }
         assert!(shaded_faces > 0);
+    }
+}
+
+#[cfg(test)]
+mod glass_tests {
+    use super::*;
+    #[test]
+    fn glass_is_separate_from_shadow_casters_and_does_not_hide_opaque_faces() {
+        let mut world = World::empty();
+        world.set(10, 10, 10, world::STONE);
+        world.set(11, 10, 10, world::GLASS);
+        let mesh = Mesh::build(&world);
+        assert_eq!(mesh.indices.len(), 36);
+        assert_eq!(mesh.glass_indices.len(), 30);
+        assert!(mesh
+            .glass_indices
+            .iter()
+            .all(|i| mesh.vertices[*i as usize].material == world::GLASS as f32));
+        assert!(mesh
+            .indices
+            .iter()
+            .all(|i| mesh.vertices[*i as usize].material != world::GLASS as f32));
     }
 }

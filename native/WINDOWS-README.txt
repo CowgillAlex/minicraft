@@ -1,8 +1,8 @@
-CEDAR VOXEL LAB v0.1.4
+CEDAR VOXEL LAB v0.2.1
 Windows x64 / native Rust + wgpu
 
-Run cedar-voxel-lab-v0.1.4-windows-x64.exe. No installer or extra asset files.
-The procedural world takes a few seconds to generate when starting.
+Run cedar-voxel-lab-v0.2.1-windows-x64.exe. No installer or extra asset files.
+The world and lighting take a few seconds to generate when starting.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 CONTROLS
@@ -14,39 +14,44 @@ Shift / Q: fly down
 Ctrl: move faster
 Scroll: change movement speed
 Esc: release mouse
+- / =: move time backward / forward. Hold to advance faster.
 R: reset camera
 H: hide/show HUD
 G: show voxel boundaries
 O: toggle ambient occlusion
 V: toggle VSync
 F11: toggle fullscreen
+
 After capturing the mouse:
 Left click: break one voxel
 Right click: place one voxel against the targeted face
 Middle click: pick the targeted material
-1-0: select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
-A mint outline highlights the targeted 6.25 cm voxel within 8 metres.
-The HUD names the selected placement material. Edits reset on exit.
-Ambient occlusion adds contact shading around recesses and nearby surfaces.
-Press O to compare it on/off.
-Version 0.1.4 fixes triangle-shaped shadow bands using geometric face normals.
-AO and its strength are unchanged. Lamps and windows remain emissive.
-Close the window to quit.
+1-0: Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
+B: select Glass
+A mint outline highlights the target within 8 metres. Edits reset on exit.
+
+LIGHTING
+Street lamps and ceiling lamps cast warm white light onto nearby surfaces.
+Cool skylight enters through windows and spreads into rooms. Glass transmits
+sunlight and propagated light; walls and roofs block it. Transparent glass
+has a subtle tint and sky reflection, and does not cast an opaque sun shadow.
+Changing time moves the sun, changes shadows and sky colour, and brings out
+warm light pools at dusk and night. The HUD displays the current time.
+Try approximately 18:30-21:00 for the strongest warm/cool contrast.
+
+Lighting repairs only affected light paths after edits and uploads only the
+changed region. Completed updates appear while editing continues, without
+waiting for a whole-world bake. LIGHT BAKE indicates any pending work.
+Geometry updates immediately.
+Sun shadows refresh when time or geometry changes. Lamp and sky propagation
+are cached independently of time. Bloom runs at quarter resolution and AO
+at half resolution. Lamp light is an indirect voxel-light approximation,
+not a separate ray-traced point shadow for every lamp.
 
 WORLD
-Each metre contains 16 voxels on each axis. Each voxel is 6.25 cm wide.
-A metre-sized block contains 4,096 voxels. The world is a finite 40 x 40 metre
-scene with terrain, a winding road, cabins, trees, lamps, a pond and a bridge.
-The camera flies freely through geometry. This version is a renderer;
-there is no driving physics or AI.
-
-PERFORMANCE
-The renderer removes buried faces, merges matching exposed faces, shares
-GPU mesh buffers, culls chunks outside the camera, and caches shadows between edits.
-Edits rebuild only affected chunks and their face/AO neighbors.
-The HUD reports frame rate, frame interval, visible triangles and chunks.
-The first frame includes shadow-map creation. Default VSync caps FPS to your
-display refresh rate. Toggle it with V to measure uncapped throughput.
+A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
+The finite 40 x 40 metre scene has terrain, cabins, roads, trees and a pond.
+Free flight has no collisions. This version has no car physics or AI.
 
 ERRORS
 Startup errors write voxel-drive-error.txt beside the executable and display

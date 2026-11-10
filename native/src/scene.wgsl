@@ -5,10 +5,24 @@ struct Uniforms {
     camera: vec4<f32>,
     sun: vec4<f32>,
     options: vec4<f32>,
+    daylight: vec4<f32>,
+    light_color: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;
 @group(1) @binding(1) var shadow_sampler: sampler_comparison;
+@group(2) @binding(0) var light_volume: texture_3d<f32>;
+@group(2) @binding(1) var light_sampler: sampler;
+fn lighting_at(world: vec3<f32>,normal: vec3<f32>) -> vec2<f32> {
+    let position = world + normal * 0.14;
+    let uv = (position + vec3(20.0,0.0,20.0) - vec3(0.03125))/vec3(40.0,12.0,40.0);
+    if any(uv<vec3(0.0)) || any(uv>vec3(1.0)) { return vec2(0.0,1.0); }
+    return textureSampleLevel(light_volume,light_sampler,uv,0.0).rg;
+}
+fn tonemap(color: vec3<f32>) -> vec3<f32> {
+    let x=color*mix(1.55,1.1,scene.daylight.x);
+    return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),vec3(0.0),vec3(1.0));
+}
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -41,13 +55,18 @@ struct VertexOut {
     return scene.light_view_proj * vec4(v.position, 1.0);
 }
 fn sky_color(direction: vec3<f32>) -> vec3<f32> {
-    let altitude = max(direction.y, 0.0);
-    let horizon = vec3(0.23, 0.27, 0.27);
-    let zenith = vec3(0.035, 0.09, 0.15);
-    var color = mix(horizon, zenith, pow(altitude, 0.48));
-    let sun_dot = max(dot(direction, scene.sun.xyz), 0.0);
-    color += vec3(0.52, 0.32, 0.13) * pow(sun_dot, 28.0);
-    color += vec3(2.5, 1.8, 0.8) * smoothstep(0.9994, 0.9998, sun_dot);
+    let altitude=max(direction.y,0.0);
+    let day=scene.daylight.x;
+    let dusk=scene.daylight.y;
+    let horizon=mix(vec3(0.008,0.017,0.04),vec3(0.25,0.34,0.43),day)+vec3(0.17,0.055,0.012)*dusk;
+    let zenith=mix(vec3(0.002,0.006,0.02),vec3(0.035,0.14,0.29),day);
+    var color=mix(horizon,zenith,pow(altitude,0.5));
+    let light_dot=max(dot(direction,scene.sun.xyz),0.0);
+    color+=scene.light_color.rgb*pow(light_dot,40.0)*scene.sun.w*0.18;
+    color+=scene.light_color.rgb*smoothstep(0.99955,0.9998,light_dot)*mix(0.3,6.0,day);
+    let star_cell=floor(direction*1200.0);
+    let star=fract(sin(dot(star_cell,vec3(127.1,311.7,74.7)))*43758.5453);
+    color+=vec3(0.3,0.42,0.65)*pow(max((star-0.9992)/0.0008,0.0),3.0)*(1.0-day)*smoothstep(0.05,0.4,altitude);
     return color;
 }
 fn shadow_visibility(world: vec3<f32>, normal: vec3<f32>) -> f32 {
@@ -90,12 +109,16 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     let noise = fract(sin(dot(voxel, vec3(12.9898, 78.233, 39.425))) * 43758.5453);
     base *= 0.94 + noise * 0.12;
     let voxel_ao = mix(mix(v.ao.x,v.ao.y,v.uv.x),mix(v.ao.w,v.ao.z,v.uv.x),v.uv.y);
-    let ambient = base * vec3(0.29, 0.38, 0.47) * (0.62 + 0.38 * max(normal.y, 0.0)) * mix(1.0,voxel_ao,scene.options.z);
-    let direct = base * vec3(1.28, 1.09, 0.80) * sunlight * visibility;
+    let field=lighting_at(v.world,normal);
+    let sky_tint=mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x);
+    let sky_light=sky_tint*pow(field.y,1.35)*(0.7+0.3*max(normal.y,0.0));
+    let block_light=vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
+    let ambient=base*(sky_light+block_light)*mix(1.0,voxel_ao,scene.options.z);
+    let direct=base*scene.light_color.rgb*scene.sun.w*sunlight*visibility;
     var color = ambient + direct;
     let luma = vec3(0.2126,0.7152,0.0722);
     var ambient_fraction = clamp(dot(ambient,luma)/max(dot(color,luma),0.00001),0.0,1.0);
-    if v.material == 9.0 { color = base * 1.4 + vec3(0.4, 0.18, 0.025); ambient_fraction = 0.0; }
+    if v.material == 9.0 { color = vec3(1.0,0.78,0.55)*7.0; ambient_fraction = 0.0; }
     if v.material == 10.0 {
         ambient_fraction = 0.0;
         let fresnel = pow(1.0 - max(dot(-direction, normal), 0.0), 3.0);
@@ -140,4 +163,17 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
 }
 @fragment fn fs_selection() -> @location(0) vec4<f32> {
     return vec4(0.45, 1.0, 0.7, 1.0);
+}
+
+@fragment fn fs_glass(v: VertexOut) -> @location(0) vec4<f32> {
+    let normal=normalize(v.normal);
+    let view=normalize(v.world-scene.camera.xyz);
+    let fresnel=pow(1.0-abs(dot(view,normal)),5.0);
+    let field=lighting_at(v.world,normal);
+    let reflection=sky_color(reflect(view,normal));
+    let color=reflection*0.75+vec3(0.025,0.055,0.065)+vec3(1.0,0.78,0.55)*pow(field.x,2.0)*0.12;
+    let border=min(min(v.uv.x,1.0-v.uv.x),min(v.uv.y,1.0-v.uv.y));
+    let edge=1.0-smoothstep(0.0,max(fwidth(border)*1.5,0.002),border);
+    let alpha=0.10+fresnel*0.48+edge*0.12;
+    return vec4(tonemap(color),alpha);
 }

@@ -3,7 +3,7 @@ use glam::{IVec3, Vec3};
 use std::collections::HashSet;
 
 pub const REACH: f32 = 8.0;
-pub const PALETTE: [u8; 10] = [
+pub const PALETTE: [u8; 11] = [
     world::STONE,
     world::GRASS,
     world::DIRT,
@@ -14,6 +14,7 @@ pub const PALETTE: [u8; 10] = [
     world::SAND,
     world::ROAD,
     world::LIGHT,
+    world::GLASS,
 ];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
@@ -21,35 +22,15 @@ pub struct Hit {
     pub adjacent: Option<[i32; 3]>,
     pub distance: f32,
 }
-pub fn grid_position(position: Vec3) -> Vec3 {
-    position / VOXEL + Vec3::new((WIDTH / 2) as f32, 0.0, (DEPTH / 2) as f32)
-}
+pub use crate::ray::grid_position;
 pub fn in_bounds(cell: [i32; 3]) -> bool {
     (0..WIDTH).contains(&cell[0]) && (0..HEIGHT).contains(&cell[1]) && (0..DEPTH).contains(&cell[2])
 }
 
 /// Traverse voxel cells exactly, keeping the last empty cell for face-adjacent placement.
 pub fn raycast(world: &World, origin: Vec3, direction: Vec3, reach: f32) -> Option<Hit> {
-    let direction = direction.normalize_or_zero();
-    if direction == Vec3::ZERO || !direction.is_finite() || !origin.is_finite() || reach < 0.0 {
-        return None;
-    }
-    let origin = grid_position(origin);
-    let mut cell = origin.floor().as_ivec3();
-    let step = direction.signum().as_ivec3();
-    let mut next = Vec3::splat(f32::INFINITY);
-    let mut delta = next;
-    for axis in 0..3 {
-        if direction[axis] != 0.0 {
-            let boundary = (cell[axis] + i32::from(direction[axis] > 0.0)) as f32;
-            next[axis] = ((boundary - origin[axis]) * VOXEL / direction[axis]).max(0.0);
-            delta[axis] = VOXEL / direction[axis].abs();
-        }
-    }
-    let mut distance = 0.0;
     let mut adjacent = None;
-    while distance <= reach {
-        let p = cell.to_array();
+    for (p, distance) in crate::ray::VoxelRay::new(origin, direction, reach) {
         if world.get(p[0], p[1], p[2]) != AIR {
             return Some(Hit {
                 cell: p,
@@ -58,16 +39,6 @@ pub fn raycast(world: &World, origin: Vec3, direction: Vec3, reach: f32) -> Opti
             });
         }
         adjacent = Some(p);
-        let axis = if next.x <= next.y && next.x <= next.z {
-            0
-        } else if next.y <= next.z {
-            1
-        } else {
-            2
-        };
-        distance = next[axis];
-        cell[axis] += step[axis];
-        next[axis] += delta[axis];
     }
     None
 }
@@ -109,6 +80,7 @@ pub fn material_name(material: u8) -> &'static str {
         world::SAND => "SAND",
         world::ROAD => "ASPHALT",
         world::LIGHT => "LAMP",
+        world::GLASS => "GLASS",
         world::WATER => "WATER",
         world::FLOWER => "FLOWER",
         world::PAINT => "ROAD PAINT",

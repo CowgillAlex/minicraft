@@ -1,6 +1,6 @@
 [package]
 name = "voxel-drive"
-version = "0.1.4"
+version = "0.2.1"
 edition = "2021"
 description = "A native voxel world explorer with 1/16-metre voxels"
 

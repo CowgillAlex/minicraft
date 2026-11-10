@@ -1,6 +1,7 @@
 use crate::{hud::HudVertex, mesh::Vertex};
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub struct Pipelines {
+    pub glass_pipeline: wgpu::RenderPipeline,
     pub selection_pipeline: wgpu::RenderPipeline,
     pub world_pipeline: wgpu::RenderPipeline,
     pub shadow_pipeline: wgpu::RenderPipeline,
@@ -13,6 +14,7 @@ impl Pipelines {
         format: wgpu::TextureFormat,
         uniform_layout: &wgpu::BindGroupLayout,
         shadow_layout: &wgpu::BindGroupLayout,
+        lighting_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("voxel shader"),
@@ -20,7 +22,7 @@ impl Pipelines {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("world pipeline layout"),
-            bind_group_layouts: &[uniform_layout, shadow_layout],
+            bind_group_layouts: &[uniform_layout, shadow_layout, lighting_layout],
             push_constant_ranges: &[],
         });
         let shadow_pipeline_layout =
@@ -36,7 +38,7 @@ impl Pipelines {
             attributes: &attributes,
         };
         let target = Some(wgpu::ColorTargetState {
-            format,
+            format: wgpu::TextureFormat::Rgba16Float,
             blend: None,
             write_mask: wgpu::ColorWrites::ALL,
         });
@@ -77,7 +79,7 @@ impl Pipelines {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_shadow",
-                buffers: &[vertex_layout],
+                buffers: std::slice::from_ref(&vertex_layout),
                 compilation_options: Default::default(),
             },
             fragment: None,
@@ -93,6 +95,33 @@ impl Pipelines {
                 },
                 ..depth_state(true)
             }),
+            multisample: Default::default(),
+            multiview: None,
+        });
+        let glass_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("translucent glass"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_world",
+                buffers: std::slice::from_ref(&vertex_layout),
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_glass",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(depth_state(false)),
             multisample: Default::default(),
             multiview: None,
         });
@@ -182,6 +211,7 @@ impl Pipelines {
             multiview: None,
         });
         Self {
+            glass_pipeline,
             selection_pipeline,
             world_pipeline,
             shadow_pipeline,

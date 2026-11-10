@@ -1,6 +1,7 @@
 /// Half-resolution screen-space AO, followed by edge-aware reconstruction.
 /// Color/depth/normal targets are recreated only when the drawable size changes.
 pub struct Occlusion {
+    bloom: crate::bloom::Bloom,
     ao_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
     ao_layout: wgpu::BindGroupLayout,
@@ -22,7 +23,7 @@ impl Occlusion {
         format: wgpu::TextureFormat,
         uniform_layout: &wgpu::BindGroupLayout,
     ) -> Self {
-        let entries: Vec<_> = (0..4)
+        let mut entries: Vec<_> = (0..4)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::FRAGMENT,
@@ -38,6 +39,22 @@ impl Occlusion {
                 count: None,
             })
             .collect();
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 4,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        });
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 5,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
         let ao_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("AO depth and normal inputs"),
             entries: &entries[..2],
@@ -94,6 +111,7 @@ impl Occlusion {
             &composite_layout,
         );
         Self {
+            bloom: crate::bloom::Bloom::new(device),
             ao_pipeline,
             composite_pipeline,
             ao_layout,
@@ -101,7 +119,12 @@ impl Occlusion {
             targets: None,
         }
     }
-    pub fn resize(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat, size: (u32, u32)) {
+    pub fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        _format: wgpu::TextureFormat,
+        size: (u32, u32),
+    ) {
         if self
             .targets
             .as_ref()
@@ -128,7 +151,12 @@ impl Occlusion {
                 })
                 .create_view(&Default::default())
         };
-        let color = texture("scene color", size.0, size.1, format);
+        let color = texture(
+            "HDR scene color",
+            size.0,
+            size.1,
+            wgpu::TextureFormat::Rgba16Float,
+        );
         let normals = texture(
             "scene normals and ambient fraction",
             size.0,
@@ -147,7 +175,8 @@ impl Occlusion {
             size.1.div_ceil(2),
             wgpu::TextureFormat::R8Unorm,
         );
-        let entries: Vec<_> = [&depth, &normals, &ao, &color]
+        self.bloom.resize(device, &color, size);
+        let mut entries: Vec<_> = [&depth, &normals, &ao, &color, self.bloom.output()]
             .iter()
             .enumerate()
             .map(|(binding, view)| wgpu::BindGroupEntry {
@@ -155,6 +184,10 @@ impl Occlusion {
                 resource: wgpu::BindingResource::TextureView(view),
             })
             .collect();
+        entries.push(wgpu::BindGroupEntry {
+            binding: 5,
+            resource: wgpu::BindingResource::Sampler(&self.bloom.sampler),
+        });
         let ao_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("AO inputs"),
             layout: &self.ao_layout,
@@ -196,6 +229,7 @@ impl Occlusion {
                 &targets.ao_group,
             );
         }
+        self.bloom.render(encoder);
         fullscreen_pass(
             encoder,
             "ambient composite",

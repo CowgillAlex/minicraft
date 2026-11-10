@@ -1,12 +1,18 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod bloom;
 mod camera;
 mod capture;
 mod capture_views;
+mod daylight;
 mod editing;
 mod hud;
+mod light_field;
+mod light_volume;
 mod mesh;
 mod occlusion;
+mod overlay;
 mod pipelines;
+mod ray;
 mod renderer;
 mod scene_mesh;
 mod world;
@@ -238,6 +244,15 @@ impl ApplicationHandler for App {
                     if self.captured {
                         self.keys.insert(key);
                     }
+                    if matches!(key, KeyCode::Minus | KeyCode::Equal) {
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.adjust_time(
+                                if key == KeyCode::Minus { -1.0 } else { 1.0 }
+                                    * if event.repeat { 0.08 } else { 0.25 },
+                            );
+                        }
+                        return;
+                    }
                     if event.repeat {
                         return;
                     }
@@ -266,6 +281,11 @@ impl ApplicationHandler for App {
                             };
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.selected_material = editing::PALETTE[index];
+                            }
+                        }
+                        KeyCode::KeyB => {
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.selected_material = crate::world::GLASS;
                             }
                         }
                         KeyCode::Escape => self.capture_cursor(false),
@@ -346,16 +366,27 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
             .transpose()?
             .unwrap_or(1)
             .clamp(1, 1000);
+        let hours = args
+            .iter()
+            .position(|arg| arg == "--time")
+            .map(|index| args.get(index + 1).ok_or("--time needs an hour"))
+            .transpose()?
+            .map(|value| value.parse::<f32>())
+            .transpose()?;
         return capture::capture(
             std::path::Path::new(path),
-            frames,
-            args.iter().any(|arg| arg == "--verify-edits"),
-            args.iter().any(|arg| arg == "--ao-closeup"),
-            !args.iter().any(|arg| arg == "--no-ao"),
-            args.iter()
-                .position(|arg| arg == "--shadow-view")
-                .and_then(|index| args.get(index + 1))
-                .map(String::as_str),
+            capture::CaptureOptions {
+                frames,
+                verify_edits: args.iter().any(|arg| arg == "--verify-edits"),
+                closeup: args.iter().any(|arg| arg == "--ao-closeup"),
+                ao_enabled: !args.iter().any(|arg| arg == "--no-ao"),
+                view: args
+                    .iter()
+                    .position(|arg| arg == "--shadow-view" || arg == "--view")
+                    .and_then(|index| args.get(index + 1))
+                    .map(String::as_str),
+                hours,
+            },
         );
     }
     let event_loop = EventLoop::new()?;

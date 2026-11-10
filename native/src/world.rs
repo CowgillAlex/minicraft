@@ -1,4 +1,5 @@
 use glam::Vec3;
+use std::{collections::HashSet, sync::Arc};
 
 pub const CHUNK: usize = 32;
 pub const NX: usize = 20;
@@ -23,8 +24,16 @@ pub const FLOWER: u8 = 11;
 pub const WALL: u8 = 12;
 pub const SAND: u8 = 13;
 
+pub const GLASS: u8 = 14;
+
+pub fn opaque(material: u8) -> bool {
+    material != AIR && material != GLASS
+}
+
+#[derive(Clone)]
 pub struct World {
-    chunks: Vec<Option<Box<[u8]>>>,
+    chunks: Vec<Option<Arc<[u8]>>>,
+    pub emitters: HashSet<[i32; 3]>,
     pub voxels: usize,
 }
 impl World {
@@ -32,6 +41,7 @@ impl World {
         Self {
             chunks: vec![None; NX * NY * NZ],
             voxels: 0,
+            emitters: HashSet::new(),
         }
     }
     fn address(x: i32, y: i32, z: i32) -> Option<(usize, usize)> {
@@ -54,12 +64,18 @@ impl World {
             if material == AIR && self.chunks[chunk].is_none() {
                 return;
             }
-            let data =
-                self.chunks[chunk].get_or_insert_with(|| vec![0; CHUNK.pow(3)].into_boxed_slice());
+            let data = self.chunks[chunk].get_or_insert_with(|| Arc::from(vec![0; CHUNK.pow(3)]));
+            let data = Arc::make_mut(data);
             let previous = data[index];
             self.voxels += usize::from(previous == AIR && material != AIR);
             self.voxels -= usize::from(previous != AIR && material == AIR);
             data[index] = material;
+            if previous == LIGHT && material != LIGHT {
+                self.emitters.remove(&[x, y, z]);
+            }
+            if material == LIGHT {
+                self.emitters.insert([x, y, z]);
+            }
         }
     }
     pub fn chunk_exists(&self, x: usize, y: usize, z: usize) -> bool {
@@ -158,7 +174,7 @@ impl World {
                 world.cuboid([x, y, z], [x + 2, y, z + 2], WOOD);
             }
             world.cuboid([x - 2, 70, z - 2], [x + 4, 75, z + 4], STONE);
-            world.cuboid([x - 1, 71, z - 1], [x + 3, 74, z + 3], LIGHT);
+            world.cuboid([x - 1, 70, z - 1], [x + 3, 74, z + 3], LIGHT);
         }
         // Footbridge over the pond, with narrow rails and individual planks.
         for x in 362..550 {
@@ -208,7 +224,16 @@ impl World {
                             y,
                             z,
                             if window {
-                                LIGHT
+                                let edge = y == base + 17
+                                    || y == base + 31
+                                    || ((z - cz).abs() >= 26
+                                        && ((x - cx).abs() == 12 || (x - cx).abs() == 24))
+                                    || ((x - cx).abs() >= 30 && (z - cz).abs() == 8);
+                                if edge {
+                                    WOOD
+                                } else {
+                                    GLASS
+                                }
                             } else if door || y % 9 == 0 {
                                 WOOD
                             } else {
@@ -217,6 +242,32 @@ impl World {
                         );
                     }
                 }
+            }
+        }
+        self.cuboid(
+            [cx - 29, base + 1, cz - 25],
+            [cx + 29, base + 1, cz + 25],
+            WOOD,
+        );
+        self.cuboid(
+            [cx - 4, base + 40, cz - 4],
+            [cx + 4, base + 41, cz + 4],
+            WOOD,
+        );
+        self.cuboid(
+            [cx - 3, base + 39, cz - 3],
+            [cx + 3, base + 39, cz + 3],
+            LIGHT,
+        );
+        // A low wooden table gives the interior light visible surfaces to fall on.
+        self.cuboid(
+            [cx - 12, base + 12, cz - 6],
+            [cx + 12, base + 13, cz + 6],
+            WOOD,
+        );
+        for x in [cx - 10, cx + 10] {
+            for z in [cz - 4, cz + 4] {
+                self.cuboid([x, base + 2, z], [x + 1, base + 11, z + 1], WOOD);
             }
         }
         for x in cx - 37..=cx + 37 {
@@ -301,6 +352,22 @@ pub fn color(material: u8) -> [f32; 3] {
         FLOWER => [0.86, 0.58, 0.39],
         WALL => [0.77, 0.68, 0.50],
         SAND => [0.59, 0.53, 0.35],
+        GLASS => [0.55, 0.77, 0.82],
         _ => [1.0, 0.0, 1.0],
+    }
+}
+
+#[cfg(test)]
+mod lighting_world_tests {
+    use super::*;
+    #[test]
+    fn generated_houses_have_glass_and_interior_lamps() {
+        let mut world = World::empty();
+        world.cabin(348, 445);
+        let base = terrain_height(348, 445) + 2;
+        assert_eq!(world.get(348 - 18, base + 24, 445 + 28), GLASS);
+        assert_eq!(world.get(348, base + 39, 445), LIGHT);
+        assert!(world.emitters.contains(&[348, base + 39, 445]));
+        assert_eq!(world.get(348, base + 2, 445), AIR);
     }
 }

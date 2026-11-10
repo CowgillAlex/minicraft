@@ -100,19 +100,20 @@ fn scene(renderer: &mut Renderer, world: World) {
 fn shadow_receivers_are_lit_at_multiple_angles_and_real_occluders_still_cast() {
     let instance = wgpu::Instance::default();
     let mut renderer = pollster::block_on(Renderer::new(&instance, None)).unwrap();
+    renderer.daylight.hours = 14.0;
     renderer.hud_enabled = false;
     renderer.ao_enabled = false;
     renderer.shadow_debug = true;
     let camera = crate::capture_views::shadow_view("house").unwrap();
     let data = pixels(&mut renderer, &camera);
     let base = world::terrain_height(348, 445) + 2;
-    let sun = Vec3::new(-0.55, 0.78, 0.30).normalize();
+    let sun = renderer.daylight.parameters().0;
     let mut checked = 0;
     let mut mismatch = 0;
     for x in (320..377).step_by(2) {
         for y in (base + 12..base + 68).step_by(2) {
             let z = if y >= base + 43 { 472 } else { 473 };
-            if renderer.scene.world.get(x, y, z) == world::AIR
+            if !world::opaque(renderer.scene.world.get(x, y, z))
                 || renderer.scene.world.get(x, y, z + 1) != world::AIR
             {
                 continue;
@@ -135,8 +136,9 @@ fn shadow_receivers_are_lit_at_multiple_angles_and_real_occluders_still_cast() {
             for dx in [-0.25, 0.0, 0.25] {
                 for dy in [-0.25, 0.0, 0.25] {
                     let origin = point + Vec3::new(dx, dy, 0.004);
-                    let blocked =
-                        crate::editing::raycast(&renderer.scene.world, origin, sun, 80.0).is_some();
+                    let blocked = crate::ray::VoxelRay::new(origin, sun, 80.0).any(|(cell, _)| {
+                        world::opaque(renderer.scene.world.get(cell[0], cell[1], cell[2]))
+                    });
                     if reference.is_some_and(|value| value != blocked) {
                         boundary = true;
                     }
@@ -202,25 +204,30 @@ fn shadow_receivers_are_lit_at_multiple_angles_and_real_occluders_still_cast() {
             }
         };
         scene(&mut renderer, world);
-        for distance in [0.35, 4.0] {
-            let camera = looking_at(
-                center + normal * distance + Vec3::new(0.13, 0.17, 0.11),
-                center,
-            );
-            let data = pixels(&mut renderer, &camera);
-            let mut checked = 0;
-            for x in -8..=8 {
-                for y in -8..=8 {
-                    let point = center + u * x as f32 * 0.05 + v * y as f32 * 0.05;
-                    if let Some(value) = sample(&data, &camera, point) {
-                        assert!(value>=250,"self-shadow acne on axis {axis}, camera distance {distance}, sample ({x},{y}): {value}");
-                        checked += 1;
+        for hour in [8.0, 14.0, 17.0, 21.0] {
+            renderer.daylight.hours = hour;
+            renderer.shadow_ready = false;
+            for distance in [0.35, 4.0] {
+                let camera = looking_at(
+                    center + normal * distance + Vec3::new(0.13, 0.17, 0.11),
+                    center,
+                );
+                let data = pixels(&mut renderer, &camera);
+                let mut checked = 0;
+                for x in -8..=8 {
+                    for y in -8..=8 {
+                        let point = center + u * x as f32 * 0.05 + v * y as f32 * 0.05;
+                        if let Some(value) = sample(&data, &camera, point) {
+                            assert!(value>=250,"self-shadow acne on axis {axis}, camera distance {distance}, sample ({x},{y}): {value}");
+                            checked += 1;
+                        }
                     }
                 }
+                assert!(checked > 25);
             }
-            assert!(checked > 25);
         }
     }
+    renderer.daylight.hours = 14.0;
     let mut world = World::empty();
     for x in 280..360 {
         for z in 280..360 {
@@ -254,4 +261,20 @@ fn shadow_receivers_are_lit_at_multiple_angles_and_real_occluders_still_cast() {
             assert!(value >= 250, "unoccluded receiver is shadowed: {value}");
         }
     }
+    let mut glass_world = renderer.scene.world.clone();
+    for x in 310..330 {
+        for y in 25..55 {
+            for z in 310..330 {
+                glass_world.set(x, y, z, world::GLASS);
+            }
+        }
+    }
+    scene(&mut renderer, glass_world);
+    let point = World::meters(340, 25, 310) + Vec3::new(0.03, 0.0, 0.03);
+    let camera = looking_at(point + Vec3::new(0.0, 3.0, -2.0), point);
+    let data = pixels(&mut renderer, &camera);
+    assert!(
+        sample(&data, &camera, point).unwrap() >= 250,
+        "glass must transmit the sun instead of casting an opaque shadow"
+    );
 }

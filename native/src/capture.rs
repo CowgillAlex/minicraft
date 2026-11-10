@@ -2,14 +2,23 @@ use crate::renderer::{FrameInfo, Renderer, Result};
 use std::{fs::File, io::BufWriter, path::Path, sync::mpsc, time::Instant};
 
 /// Render through the same GPU pipelines without a desktop window, for validation.
-pub fn capture(
-    path: &Path,
-    frames: u32,
-    verify_edits: bool,
-    closeup: bool,
-    ao_enabled: bool,
-    shadow_view: Option<&str>,
-) -> Result<()> {
+pub struct CaptureOptions<'a> {
+    pub frames: u32,
+    pub verify_edits: bool,
+    pub closeup: bool,
+    pub ao_enabled: bool,
+    pub view: Option<&'a str>,
+    pub hours: Option<f32>,
+}
+pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
+    let CaptureOptions {
+        frames,
+        verify_edits,
+        closeup,
+        ao_enabled,
+        view: shadow_view,
+        hours,
+    } = options;
     let instance = wgpu::Instance::default();
     let mut renderer = pollster::block_on(Renderer::new(&instance, None))?;
     let (width, height) = (1280_u32, 800_u32);
@@ -29,6 +38,12 @@ pub fn capture(
     });
     let view = texture.create_view(&Default::default());
     renderer.ao_enabled = ao_enabled;
+    if let Some(hours) = hours {
+        if !hours.is_finite() {
+            return Err("--time must be finite".into());
+        }
+        renderer.daylight.hours = hours.rem_euclid(24.0);
+    }
     let mut camera = shadow_view
         .map(crate::capture_views::shadow_view)
         .transpose()?
@@ -105,9 +120,44 @@ pub fn capture(
         if renderer.visible_triangles != before {
             return Err("Break/place round trip changed the restored mesh".into());
         }
+        let selected = renderer.selected_material;
+        renderer.selected_material = crate::world::LIGHT;
+        if !renderer.edit(&camera, true) {
+            return Err("Lamp placement failed".into());
+        }
+        renderer.finish_lighting();
+        renderer.render(
+            &view,
+            &camera,
+            FrameInfo {
+                size: (width, height),
+                fps: 0.0,
+                captured: true,
+                vsync: false,
+            },
+        );
+        if !renderer.edit(&camera, false) {
+            return Err("Lamp removal failed".into());
+        }
+        renderer.finish_lighting();
+        renderer.selected_material = selected;
+        renderer.render(
+            &view,
+            &camera,
+            FrameInfo {
+                size: (width, height),
+                fps: 0.0,
+                captured: true,
+                vsync: false,
+            },
+        );
+        if renderer.visible_triangles != before {
+            return Err("Lamp round trip changed the restored mesh".into());
+        }
         renderer.device.poll(wgpu::Maintain::Wait);
-        println!("GPU edit verification passed: break, place, chunk replacement, shadow refresh and target outline");
+        println!("GPU edit verification passed: break, place, chunk replacement, shadow refresh, target outline and incremental lamp uploads");
     }
+    renderer.finish_lighting();
     let start = Instant::now();
     for _ in 0..frames {
         renderer.render(

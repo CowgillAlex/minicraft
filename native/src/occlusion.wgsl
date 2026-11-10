@@ -1,12 +1,15 @@
 struct Uniforms {
     view_proj: mat4x4<f32>, inverse_view_proj: mat4x4<f32>, light_view_proj: mat4x4<f32>,
     camera: vec4<f32>, sun: vec4<f32>, options: vec4<f32>,
+    daylight: vec4<f32>, light_color: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(1) @binding(0) var depth_map: texture_depth_2d;
 @group(1) @binding(1) var normal_map: texture_2d<f32>;
 @group(1) @binding(2) var ao_map: texture_2d<f32>;
 @group(1) @binding(3) var color_map: texture_2d<f32>;
+@group(1) @binding(4) var bloom_map: texture_2d<f32>;
+@group(1) @binding(5) var bloom_sampler: sampler;
 @vertex fn vs_fullscreen(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
     let p = vec2(f32((index << 1u) & 2u), f32(index & 2u)) * 2.0 - 1.0;
     return vec4(p, 0.0, 1.0);
@@ -50,11 +53,18 @@ fn world_position(p: vec2<i32>) -> vec3<f32> {
     }
     return pow(clamp(1.0 - occlusion / max(samples,1.0) * 3.0, 0.18, 1.0), 1.35);
 }
+fn tonemap(color: vec3<f32>) -> vec3<f32> {
+    let x=color*mix(1.55,1.1,scene.daylight.x);
+    return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),vec3(0.0),vec3(1.0));
+}
 @fragment fn fs_composite(@builtin(position) screen: vec4<f32>) -> @location(0) vec4<f32> {
     let pixel = full_pixel(vec2<i32>(screen.xy));
-    let color = textureLoad(color_map,pixel,0).rgb;
+    let raw_color=textureLoad(color_map,pixel,0).rgb;
+    if scene.options.w>0.5 {return vec4(raw_color,1.0);}
+    let bloom=textureSampleLevel(bloom_map,bloom_sampler,screen.xy/vec2<f32>(textureDimensions(color_map)),0.0).rgb*mix(0.16,0.08,scene.daylight.x);
+    let color=raw_color;
     let packed = textureLoad(normal_map,pixel,0);
-    if scene.options.z < 0.5 || packed.a < 0.001 { return vec4(color,1.0); }
+    if scene.options.z < 0.5 || packed.a < 0.001 { return vec4(tonemap(color+bloom),1.0); }
     let point = world_position(pixel);
     let normal = normalize(packed.xyz*2.0-1.0);
     let half_pos = (vec2<f32>(pixel)+0.5)*0.5-0.5;
@@ -75,5 +85,5 @@ fn world_position(p: vec2<i32>) -> vec3<f32> {
         weight_sum += weight;
     }}
     let ao = select(1.0,total/max(weight_sum,0.00001),weight_sum>0.00001);
-    return vec4(color * (1.0-packed.a*(1.0-ao)),1.0);
+    return vec4(tonemap(color * (1.0-packed.a*(1.0-ao))+bloom),1.0);
 }
