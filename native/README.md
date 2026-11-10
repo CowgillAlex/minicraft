@@ -34,7 +34,7 @@ F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordin
 - Hidden-face removal across chunk boundaries and greedy merging of faces with matching material and ambient occlusion.
 - Shared vertex/index buffers for the generated scene, with per-chunk GPU replacements after edits and per-chunk frustum culling. Edits remesh only the touched chunk and neighbors whose faces or corner AO may change.
 - A cached 4096² directional shadow map with hardware-filtered comparison sampling. A conservative depth bias bounds the full filter footprint using geometric face normals, avoiding triangle-shaped self-shadow bands. The per-frame shadow lookup uses one filtered comparison rather than nine manual taps. The map is reused until an edit invalidates it, then refreshed on the next frame.
-- Bilinear voxel-corner ambient occlusion, plus half-resolution screen-space ambient occlusion with a 0.55 metre radius and depth/normal-aware upsampling. AO darkens the ambient lighting contribution; emissive lamps, water reflections, direct sunlight, the target outline, and HUD are preserved. Turning AO off skips its sampling pass. Procedural surface variation, animated water highlights, sky, and distance fog complete the scene.
+- Bilinear voxel-corner ambient occlusion, plus half-resolution screen-space ambient occlusion with a 0.55 metre radius and depth/normal-aware upsampling. AO darkens the ambient lighting contribution; emissive lamps, direct sunlight, shadowed water highlights, the target outline, and HUD are preserved. Turning AO off skips its sampling pass. Procedural surface variation, animated water highlights, sky, and distance fog complete the scene.
 - Back-to-front chunk-sorted glass rendering after the opaque lighting/AO pass. Glass transmits sunlight and has lightly tinted reflections; its depth does not incorrectly occlude interior AO.
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
 - Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
@@ -49,12 +49,15 @@ Two light channels are cached on a 0.25 metre grid: lamp light and skylight. Vox
 
 The initial bake runs at startup. A background worker retains the connectivity graph and source values. Edits recheck only nearby connections, affected sky columns, and nearby lamp seeds. A local removal/refill flood repairs illumination, including closing windows or removing sources. Only the affected texture subvolume is uploaded. Queued edits are coalesced without losing their dirty cells, and completed patches appear in order while editing continues. Cheap copy-on-write snapshots keep geometry responsive; a LIGHT BAKE indicator reports pending work. New time-of-day values update shader parameters and invalidate sun shadows without rebuilding the diffuse light field. The sun/moon, sky, fog and exposure change with the clock. Glass sorting is per chunk; this is intended for clear window panes rather than arbitrary overlapping coloured transparent volumes.
 
+Water waves perturb reflection normals instead of adding unlit brightness. Reflections respect the sky-access field and shadow visibility; sun/moon specular highlights use the same directional shadow map. Ambient water lighting participates in contact AO, so covered water remains dark at night.
+
 ## Verify
 
 ```sh
 cargo test --locked
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --release --locked shadow_receivers -- --ignored --nocapture
+cargo test --release --locked water_receives_shadows -- --ignored --nocapture
 cargo test --release --locked benchmark_lighting_edits -- --ignored --nocapture
 cargo run --release --locked -- --screenshot scene.png --frames 3
 cargo run --release --locked -- --screenshot edits.png --verify-edits
@@ -64,6 +67,7 @@ cargo run --release --locked -- --screenshot house.png --shadow-view house
 cargo run --release --locked -- --screenshot terrain.png --shadow-view terrain
 cargo run --release --locked -- --screenshot leaves.png --shadow-view leaves
 cargo run --release --locked -- --screenshot night.png --view street --time 21
+cargo run --release --locked -- --screenshot water-night.png --view water --time 3
 cargo run --release --locked -- --screenshot menu.png --ui pause
 cargo run --release --locked -- --screenshot settings.png --ui settings --size 800x600
 cargo run --release --locked -- --screenshot controls.png --ui controls
@@ -71,6 +75,8 @@ cargo run --release --locked -- --screenshot debug.png --ui debug
 cargo run --release --locked -- --screenshot inside.png --view interior --time 21
 cargo run --release --locked -- --screenshot glass.png --view window --time 12
 ```
+
+A separate GPU test compares open and roof-shaded water at noon and night.
 
 Lighting tests compare incremental edits and partial texture uploads byte-for-byte with fresh full bakes, including lamp removal, overlapping sources, windows, roofs, and coalesced edits. The opt-in lighting benchmark reports initial bake time, edit latency, and uploaded bytes in the generated world.
 

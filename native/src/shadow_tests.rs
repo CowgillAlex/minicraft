@@ -6,7 +6,7 @@ use crate::{
 };
 use glam::Vec3;
 
-fn looking_at(position: Vec3, target: Vec3) -> Camera {
+pub(super) fn looking_at(position: Vec3, target: Vec3) -> Camera {
     let direction = (target - position).normalize();
     Camera {
         position,
@@ -15,7 +15,7 @@ fn looking_at(position: Vec3, target: Vec3) -> Camera {
         ..Default::default()
     }
 }
-fn pixels(renderer: &mut Renderer, camera: &Camera) -> Vec<u8> {
+pub(super) fn pixels(renderer: &mut Renderer, camera: &Camera) -> Vec<u8> {
     let size = 512;
     let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow regression readback"),

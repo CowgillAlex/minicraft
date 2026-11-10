@@ -526,3 +526,7 @@ impl Renderer {
 #[cfg(test)]
 #[path = "shadow_tests.rs"]
 mod shadow_tests;
+
+#[cfg(test)]
+#[path = "water_tests.rs"]
+mod water_tests;

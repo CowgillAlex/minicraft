@@ -7,6 +7,7 @@ pub fn shadow_view(name: &str) -> Result<Camera> {
         "house" => (Vec3::new(2.0, 4.3, 12.2), Vec3::new(1.75, 3.7, 7.8)),
         "terrain" => (Vec3::new(-7.6, 2.1, 10.5), Vec3::new(-7.6, 1.1, 9.2)),
         "leaves" => (Vec3::new(-9.8, 5.0, 12.7), Vec3::new(-10.5, 5.1, 10.6)),
+        "water" => (Vec3::new(6.0, 2.8, -6.0), Vec3::new(8.0, 1.25, -9.7)),
         "street" => (Vec3::new(-9.0, 3.3, 3.2), Vec3::new(-4.6, 2.6, -0.4)),
         "interior" => {
             let base = crate::world::terrain_height(348, 445) + 2;
@@ -23,7 +24,9 @@ pub fn shadow_view(name: &str) -> Result<Camera> {
             )
         }
         _ => {
-            return Err("--view must be house, terrain, leaves, street, interior or window".into())
+            return Err(
+                "--view must be house, terrain, leaves, water, street, interior or window".into(),
+            )
         }
     };
     let direction = (target - position).normalize();

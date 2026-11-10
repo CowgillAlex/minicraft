@@ -120,11 +120,21 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     var ambient_fraction = clamp(dot(ambient,luma)/max(dot(color,luma),0.00001),0.0,1.0);
     if v.material == 9.0 { color = vec3(1.0,0.78,0.55)*7.0; ambient_fraction = 0.0; }
     if v.material == 10.0 {
-        ambient_fraction = 0.0;
-        let fresnel = pow(1.0 - max(dot(-direction, normal), 0.0), 3.0);
-        let ripples = sin(v.world.x * 14.0 + scene.options.x) * sin(v.world.z * 9.0 - scene.options.x * 0.7);
-        color = mix(color, sky_color(reflect(direction, normal)), 0.25 + fresnel * 0.6);
-        color += vec3(0.025, 0.04, 0.035) * max(0.0, ripples);
+        let phase = scene.options.x;
+        let wave_normal = normalize(normal + vec3(
+            sin(v.world.x*3.1+phase*0.7)*cos(v.world.z*2.3+phase*0.3),
+            0.0,
+            cos(v.world.x*2.7-phase*0.4)*sin(v.world.z*3.7+phase*0.5)
+        )*0.035);
+        let fresnel = 0.04+0.96*pow(1.0-max(dot(-direction,wave_normal),0.0),5.0);
+        let amount = 0.12+fresnel*0.72;
+        // Reflections need sky access, and highlights must obey sun/moon shadows.
+        // Waves perturb the normal; they never add unlit, emissive brightness.
+        let reflection = sky_color(reflect(direction,wave_normal))*pow(field.y,1.35)*mix(0.25,1.0,visibility);
+        let specular = pow(max(dot(reflect(-scene.sun.xyz,wave_normal),-direction),0.0),96.0);
+        let reflected_ambient = ambient*(1.0-amount)+reflection*amount;
+        color = reflected_ambient+direct*(1.0-amount)+scene.light_color.rgb*scene.sun.w*specular*visibility*0.6;
+        ambient_fraction = clamp(dot(reflected_ambient,luma)/max(dot(color,luma),0.00001),0.0,1.0);
     }
     if scene.options.y > 0.5 {
         let grid_pos = fract(v.world * 16.0);
