@@ -27,6 +27,7 @@ pub enum Action {
     AmbientOcclusion,
     Vsync,
     Grid,
+    LocalTime,
     Earlier,
     Later,
 }
@@ -69,7 +70,7 @@ impl Layout {
         let (w, h) = match panel {
             Panel::Pause => (360.0, 348.0),
             Panel::Controls => (520.0, 478.0),
-            Panel::Settings => (440.0, 382.0),
+            Panel::Settings => (440.0, 442.0),
         };
         Rect {
             x: (self.width - w) / 2.0,
@@ -106,7 +107,8 @@ impl Layout {
                 add(80.0, "Ambient occlusion", Action::AmbientOcclusion, false);
                 add(134.0, "VSync", Action::Vsync, false);
                 add(188.0, "Voxel outlines", Action::Grid, false);
-                add(314.0, "Back", Action::Back, false);
+                add(242.0, "Use local time", Action::LocalTime, false);
+                add(374.0, "Back", Action::Back, false);
                 for (offset, label, action) in [
                     (0.0, "-", Action::Earlier),
                     (p.w - 92.0, "+", Action::Later),
@@ -114,7 +116,7 @@ impl Layout {
                     buttons.push(Button {
                         rect: Rect {
                             x: p.x + 24.0 + offset,
-                            y: p.y + 252.0,
+                            y: p.y + 312.0,
                             w: 44.0,
                             h: 40.0,
                         },
@@ -166,20 +168,24 @@ mod tests {
         }
         let layout = Layout::new((1440, 900));
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 361.0]),
+            layout.action_at(Panel::Settings, [720.0, 331.0]),
             Some(Action::AmbientOcclusion)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 415.0]),
+            layout.action_at(Panel::Settings, [720.0, 385.0]),
             Some(Action::Vsync)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [546.0, 531.0]),
+            layout.action_at(Panel::Settings, [546.0, 561.0]),
             Some(Action::Earlier)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [894.0, 531.0]),
+            layout.action_at(Panel::Settings, [894.0, 561.0]),
             Some(Action::Later)
+        );
+        assert_eq!(
+            layout.action_at(Panel::Settings, [720.0, 493.0]),
+            Some(Action::LocalTime)
         );
         assert_eq!(
             layout.action_at(Panel::Controls, [720.0, 643.0]),

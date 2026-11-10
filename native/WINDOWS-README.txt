@@ -1,14 +1,18 @@
-MINICRAFT v0.4.0
+MINICRAFT v0.4.1
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.4.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.4.1-windows-x64.exe. No installer or extra asset files.
 The world and lighting take a few seconds to generate when starting.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
 A compact bottom hotbar shows block previews and the selected material.
 Esc opens the clickable world menu. Settings control AO, VSync, voxel
-outlines, and time of day. F1 shows controls and F3 shows debug info.
+outlines, and time of day. Use local time follows the computer clock in
+its local timezone, including while menus are open. This option is off
+by default and lasts for the current session. Turning it off keeps the
+current time. The -/+ time buttons and -/= keys switch back to manual.
+F1 shows controls and F3 shows debug info.
 
 CONTROLS
 Play / Back to world / Enter: capture mouse

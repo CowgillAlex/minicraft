@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.4.0 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.4.1 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -24,7 +24,7 @@ Choose Play or press Enter to capture the mouse. WASD moves, mouse looks, Space/
 
 After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass. A depth-tested mint outline highlights the target within eight metres. Placement cannot overlap the player body at its simulated or interpolated position, or leave world bounds. Edits last for the current session and reset when you exit.
 
-The playing HUD contains a compact bottom hotbar with isometric material previews, a crosshair, a small clock, and a selected material label. The dark Escape menu has clickable resume, settings, controls, and quit buttons. Settings control AO, VSync, voxel outlines, and time of day. Menus scale with the window and high-DPI displays. H hides the HUD for screenshots; Esc restores the menu.
+The playing HUD contains a compact bottom hotbar with isometric material previews, a crosshair, a small clock, and a selected material label. The dark Escape menu has clickable resume, settings, controls, and quit buttons. Settings control AO, VSync, voxel outlines, and time of day. Use local time makes the sun, moon, and HUD clock follow the computer clock in its local timezone. It is off by default and applies for the current session. Disabling it keeps the current game time; using -/= or the time buttons also switches back to manual control. Menus scale with the window and high-DPI displays. H hides the HUD for screenshots; Esc restores the menu.
 
 F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, target data, and the 20 TPS tick count/grounded state. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
 
@@ -53,7 +53,7 @@ Alex's [Paper-Minecraft AABB](https://github.com/CowgillAlex/Paper-Minecraft/blo
 
 ## Lighting
 
-Street lamps and ceiling lamps emit warm white light. Window blocks are translucent glass rather than emitters, so interiors receive actual lamp light and cool skylight. Glass is selectable with B. - and = adjust the clock in either direction; holding a key repeats the adjustment. The HUD shows local simulation time. Sunset and night around 18:30-21:00 emphasize the contrast between warm lamps and the cool sky.
+Street lamps and ceiling lamps emit warm white light. Window blocks are translucent glass rather than emitters, so interiors receive actual lamp light and cool skylight. Glass is selectable with B. - and = adjust the clock in either direction; holding a key repeats the adjustment. The HUD shows game time. Enable Use local time in Settings to follow the computer clock, including while menus are open. The OS clock is sampled at most once per second; only changed times invalidate the sun shadow map, and the diffuse light volume is reused. Sunset and night around 18:30-21:00 emphasize the contrast between warm lamps and the cool sky.
 
 Two light channels are cached on a 0.25 metre grid: lamp light and skylight. Voxel-accurate segment checks connect neighboring light cells, so even thin opaque walls stop transport. Glass adds a small attenuation instead of blocking light. A brightest-first flood fill spreads light around corners. The GPU reads an interpolated RG8 3D texture, with no loop over lamps per pixel. Skylight is a diffuse sky-access approximation independent of solar direction; directional sunlight still uses the sun shadow map. Lamp light is diffuse propagated illumination, not per-lamp ray-traced shadows.
 
@@ -100,7 +100,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC an
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.4.0/minicraft-v0.4.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.4.1/minicraft-v0.4.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the notice.
 

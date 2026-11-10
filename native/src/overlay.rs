@@ -13,6 +13,7 @@ pub struct OverlayStats<'a> {
     pub chunks: usize,
     pub ao_enabled: bool,
     pub grid: bool,
+    pub local_time: bool,
     pub material: u8,
     pub target: Option<Hit>,
     pub time: &'a str,

@@ -62,11 +62,22 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             }
         }
         Panel::Settings => {
+            hud.text(
+                if stats.local_time {
+                    "Adjusting time switches back to manual."
+                } else {
+                    "Sun and moon follow your computer's clock."
+                },
+                p.x + 26.0,
+                p.y + 294.0,
+                12.0,
+                MUTED,
+            );
             hud.styled_text("Settings", p.x + 26.0, p.y + 26.0, 24.0, TEXT, true);
             hud.centered(
                 &format!("Time of day   {}", stats.time),
                 p.x + p.w / 2.0,
-                p.y + 264.0,
+                p.y + 324.0,
                 14.0,
                 TEXT,
                 false,
@@ -99,6 +110,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             Action::AmbientOcclusion => Some(stats.ao_enabled),
             Action::Vsync => Some(vsync),
             Action::Grid => Some(stats.grid),
+            Action::LocalTime => Some(stats.local_time),
             _ => None,
         };
         if let Some(enabled) = toggle {

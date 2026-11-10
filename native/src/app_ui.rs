@@ -69,6 +69,7 @@ impl App {
                         Action::Back => renderer.ui.panel = Panel::Pause,
                         Action::AmbientOcclusion => renderer.ao_enabled = !renderer.ao_enabled,
                         Action::Grid => renderer.grid = !renderer.grid,
+                        Action::LocalTime => renderer.toggle_local_time(),
                         Action::Earlier => renderer.adjust_time(-0.5),
                         Action::Later => renderer.adjust_time(0.5),
                         _ => {}

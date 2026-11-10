@@ -277,6 +277,13 @@ impl Renderer {
         }
         changed
     }
+    pub fn toggle_local_time(&mut self) {
+        self.daylight
+            .set_local_time(!self.daylight.follows_local_time());
+        if self.daylight.sync_clock() {
+            self.shadow_ready = false;
+        }
+    }
     pub fn adjust_time(&mut self, hours: f32) {
         self.daylight.advance(hours);
         self.shadow_ready = false;
@@ -295,6 +302,9 @@ impl Renderer {
         }
     }
     pub fn render(&mut self, view: &wgpu::TextureView, camera: &Camera, info: FrameInfo) {
+        if self.daylight.sync_clock() {
+            self.shadow_ready = false;
+        }
         self.lighting.poll(&self.queue);
         let FrameInfo {
             size: (width, height),
@@ -514,6 +524,7 @@ impl Renderer {
                 chunks: self.visible_chunks,
                 ao_enabled: self.ao_enabled,
                 grid: self.grid,
+                local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
                 target: self.target,
                 time: &time,
