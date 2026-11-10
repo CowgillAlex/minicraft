@@ -7,6 +7,8 @@ pub struct CaptureOptions<'a> {
     pub ui: Option<&'a str>,
     pub size: Option<(u32, u32)>,
     pub verify_edits: bool,
+    pub verify_doors: bool,
+    pub door: Option<&'a str>,
     pub closeup: bool,
     pub ao_enabled: bool,
     pub view: Option<&'a str>,
@@ -18,6 +20,8 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         ui,
         size,
         verify_edits,
+        verify_doors,
+        door,
         closeup,
         ao_enabled,
         view: shadow_view,
@@ -97,6 +101,12 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         let direction = (target - camera.position).normalize();
         camera.yaw = direction.z.atan2(direction.x);
         camera.pitch = direction.y.asin();
+    }
+    if verify_doors {
+        renderer.verify_doors()?;
+    }
+    if let Some(state) = door {
+        renderer.capture_door_state(state)?;
     }
     if verify_edits {
         camera.position =
@@ -181,6 +191,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         renderer.device.poll(wgpu::Maintain::Wait);
         println!("GPU edit verification passed: break, place, chunk replacement, shadow refresh, target outline and incremental lamp uploads");
     }
+    renderer.finish_doors();
     renderer.finish_lighting();
     let start = Instant::now();
     for _ in 0..frames {

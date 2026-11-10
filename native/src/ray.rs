@@ -15,13 +15,18 @@ pub struct VoxelRay {
 }
 impl VoxelRay {
     pub fn new(origin: Vec3, direction: Vec3, reach: f32) -> Self {
+        Self::from_grid(grid_position(origin), direction, reach)
+    }
+    pub fn local(origin: Vec3, direction: Vec3, reach: f32) -> Self {
+        Self::from_grid(origin / VOXEL, direction, reach)
+    }
+    fn from_grid(origin: Vec3, direction: Vec3, reach: f32) -> Self {
         let direction = direction.normalize_or_zero();
         let valid = direction != Vec3::ZERO
             && direction.is_finite()
             && origin.is_finite()
             && reach.is_finite()
             && reach >= 0.0;
-        let origin = grid_position(origin);
         let cell = origin.floor().as_ivec3();
         let mut next = Vec3::splat(f32::INFINITY);
         let mut delta = next;

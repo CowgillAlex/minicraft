@@ -57,12 +57,19 @@ impl SceneMesh {
             replacements: HashMap::new(),
         }
     }
-    pub fn edit(&mut self, device: &wgpu::Device, cell: [i32; 3], material: u8) -> bool {
-        if !editing::in_bounds(cell) || self.world.get(cell[0], cell[1], cell[2]) == material {
-            return false;
-        }
-        self.world.set(cell[0], cell[1], cell[2], material);
-        for chunk in editing::affected_chunks(cell) {
+    pub fn edit(
+        &mut self,
+        device: &wgpu::Device,
+        cell: [i32; 3],
+        material: u8,
+    ) -> Option<Vec<[i32; 3]>> {
+        let edit = self.world.edit(cell, material)?;
+        let chunks: std::collections::HashSet<_> = edit
+            .terrain
+            .iter()
+            .flat_map(|&p| editing::affected_chunks(p))
+            .collect();
+        for chunk in chunks {
             let mesh = Mesh::build_chunk(&self.world, chunk);
             let replacement = if mesh.indices.is_empty() && mesh.glass_indices.is_empty() {
                 None
@@ -87,7 +94,7 @@ impl SceneMesh {
             };
             self.replacements.insert(chunk, replacement);
         }
-        true
+        Some(edit.light)
     }
     pub fn draw<'a>(
         &'a self,

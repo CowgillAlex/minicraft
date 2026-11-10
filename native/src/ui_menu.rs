@@ -49,14 +49,16 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("Ctrl / Scroll", "Boost / adjust speed"),
                 ("Left / Right click", "Break / place a voxel"),
                 ("Middle click", "Pick material"),
-                ("1 - 0 / B", "Select material / glass"),
+                ("E", "Open / close a door"),
+                ("1 - 0", "Select material"),
+                ("B / N", "Glass / door handle"),
                 ("- / =", "Earlier / later time"),
                 ("F1 / F3", "Controls / debug info"),
                 ("H / F11", "Hide UI / fullscreen"),
                 ("R / Esc", "Reset view / world menu"),
             ];
             for (i, (key, description)) in rows.iter().enumerate() {
-                let y = p.y + 76.0 + i as f32 * 26.0;
+                let y = p.y + 76.0 + i as f32 * 24.0;
                 hud.text(key, p.x + 28.0, y, 14.0, ACCENT);
                 hud.text(description, p.x + 224.0, y, 14.0, TEXT);
             }

@@ -14,6 +14,7 @@ pub struct OverlayStats<'a> {
     pub ao_enabled: bool,
     pub grid: bool,
     pub local_time: bool,
+    pub interaction: Option<&'a str>,
     pub material: u8,
     pub target: Option<Hit>,
     pub time: &'a str,
@@ -81,6 +82,27 @@ pub fn vertices(
         hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
     }
     if captured {
+        if let Some(hint) = stats.interaction {
+            let width = Hud::text_width(hint, 13.0, false) + 24.0;
+            hud.rounded_rect(
+                Rect {
+                    x: layout.width / 2.0 - width / 2.0,
+                    y: layout.height / 2.0 + 22.0,
+                    w: width,
+                    h: 28.0,
+                },
+                7.0,
+                [0.035, 0.045, 0.05, 0.9],
+            );
+            hud.centered(
+                hint,
+                layout.width / 2.0,
+                layout.height / 2.0 + 29.0,
+                13.0,
+                TEXT,
+                false,
+            );
+        }
         let (x, y) = (layout.width / 2.0, layout.height / 2.0);
         for (dx, dy, w, h) in [
             (-6.0, -0.5, 4.0, 1.0),
@@ -142,11 +164,11 @@ fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
     );
     hud.centered(&name, layout.width / 2.0, bar.y - 29.0, 15.0, TEXT, true);
     for (i, &m) in editing::PALETTE.iter().enumerate() {
-        let x = bar.x + 8.0 + i as f32 * 50.0;
+        let x = bar.x + 8.0 + i as f32 * 46.0;
         let slot = Rect {
             x,
             y: bar.y + 7.0,
-            w: 48.0,
+            w: 44.0,
             h: 50.0,
         };
         if m == material {
@@ -155,7 +177,7 @@ fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
                 Rect {
                     x: x + 1.5,
                     y: slot.y + 1.5,
-                    w: 45.0,
+                    w: 41.0,
                     h: 47.0,
                 },
                 5.5,
@@ -164,9 +186,11 @@ fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
         } else {
             hud.rounded_rect(slot, 7.0, [0.18, 0.22, 0.23, 0.42]);
         }
-        crate::ui_icons::block(hud, x + 12.0, bar.y + 13.0, 26.0, m);
+        crate::ui_icons::block(hud, x + 10.0, bar.y + 13.0, 26.0, m);
         let key = if i == 10 {
             "B".to_string()
+        } else if i == 11 {
+            "N".to_string()
         } else {
             ((i + 1) % 10).to_string()
         };

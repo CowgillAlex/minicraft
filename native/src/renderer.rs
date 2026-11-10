@@ -1,9 +1,11 @@
 use crate::{
     camera::{Camera, Frustum},
     daylight::Daylight,
-    editing::{self, Hit},
+    door_gpu::DoorGpu,
+    editing::{self},
     light_volume::LightVolume,
     occlusion::Occlusion,
+    picking::{self, Target},
     pipelines::Pipelines,
     scene_mesh::SceneMesh,
     world::World,
@@ -50,7 +52,9 @@ pub struct Renderer {
     lighting: LightVolume,
     pub daylight: Daylight,
     selection: wgpu::Buffer,
-    target: Option<Hit>,
+    target: Option<Target>,
+    door_meshes: Vec<DoorGpu>,
+    door_notice: Option<(&'static str, Instant)>,
     pub selected_material: u8,
     hud_buffer: wgpu::Buffer,
     hud_font: wgpu::BindGroup,
@@ -235,6 +239,8 @@ impl Renderer {
             daylight: Daylight::default(),
             selection,
             target: None,
+            door_meshes: Vec::new(),
+            door_notice: None,
             selected_material: crate::world::STONE,
             hud_buffer,
             hud_font,
@@ -253,12 +259,8 @@ impl Renderer {
         &self.scene.world
     }
     pub fn target_cell(&self, camera: &Camera, place: bool) -> Option<[i32; 3]> {
-        let hit = editing::raycast(
-            &self.scene.world,
-            camera.position,
-            camera.direction(),
-            editing::REACH,
-        )?;
+        let target = picking::cast(&self.scene.world, &self.door_meshes, camera)?;
+        let hit = target.hit(&self.scene.world);
         editing::edit_cell(hit, camera.position, place)
     }
     pub fn edit(&mut self, camera: &Camera, place: bool) -> bool {
@@ -270,12 +272,13 @@ impl Renderer {
         } else {
             crate::world::AIR
         };
-        let changed = self.scene.edit(&self.device, cell, material);
-        if changed {
-            self.shadow_ready = false;
-            self.lighting.request(&self.scene.world, cell);
-        }
-        changed
+        let Some(changes) = self.scene.edit(&self.device, cell, material) else {
+            return false;
+        };
+        self.shadow_ready = false;
+        self.door_notice = None;
+        self.lighting.request(&self.scene.world, changes);
+        true
     }
     pub fn toggle_local_time(&mut self) {
         self.daylight
@@ -292,13 +295,8 @@ impl Renderer {
         self.lighting.wait(&self.queue);
     }
     pub fn pick_material(&mut self, camera: &Camera) {
-        if let Some(hit) = editing::raycast(
-            &self.scene.world,
-            camera.position,
-            camera.direction(),
-            editing::REACH,
-        ) {
-            self.selected_material = self.scene.world.get(hit.cell[0], hit.cell[1], hit.cell[2]);
+        if let Some(target) = picking::cast(&self.scene.world, &self.door_meshes, camera) {
+            self.selected_material = target.material(&self.scene.world);
         }
     }
     pub fn render(&mut self, view: &wgpu::TextureView, camera: &Camera, info: FrameInfo) {
@@ -306,6 +304,7 @@ impl Renderer {
             self.shadow_ready = false;
         }
         self.lighting.poll(&self.queue);
+        self.sync_doors();
         let FrameInfo {
             size: (width, height),
             fps,
@@ -339,20 +338,15 @@ impl Renderer {
         );
         let frustum = Frustum::new(matrix);
         self.target = if captured {
-            editing::raycast(
-                &self.scene.world,
-                camera.position,
-                camera.direction(),
-                editing::REACH,
-            )
+            picking::cast(&self.scene.world, &self.door_meshes, camera)
         } else {
             None
         };
-        if let Some(hit) = self.target {
+        if let Some(target) = self.target {
             self.queue.write_buffer(
                 &self.selection,
                 0,
-                bytemuck::cast_slice(&editing::outline(hit)),
+                bytemuck::cast_slice(&target.outline(&self.scene.world, &self.door_meshes)),
             );
         }
         let mut encoder = self
@@ -378,6 +372,9 @@ impl Renderer {
             pass.set_pipeline(&self.pipelines.shadow_pipeline);
             pass.set_bind_group(0, &self.uniform_group, &[]);
             self.scene.draw(&mut pass, None);
+            for door in &self.door_meshes {
+                door.draw(&mut pass, None, false);
+            }
             self.shadow_ready = true;
         }
         {
@@ -420,6 +417,13 @@ impl Renderer {
             pass.set_bind_group(2, &self.lighting.group, &[]);
             (self.visible_chunks, self.visible_triangles) =
                 self.scene.draw(&mut pass, Some(&frustum));
+            for door in &self.door_meshes {
+                let triangles = door.draw(&mut pass, Some(&frustum), false);
+                if triangles > 0 {
+                    self.visible_chunks += 1;
+                    self.visible_triangles += triangles;
+                }
+            }
         }
         self.occlusion
             .render(&mut encoder, view, &self.uniform_group, self.ao_enabled);
@@ -452,6 +456,13 @@ impl Renderer {
             let (chunks, triangles) = self.scene.draw_glass(&mut pass, &frustum, camera.position);
             self.visible_chunks += chunks;
             self.visible_triangles += triangles;
+            for door in &self.door_meshes {
+                let triangles = door.draw(&mut pass, Some(&frustum), true);
+                if triangles > 0 {
+                    self.visible_chunks += 1;
+                    self.visible_triangles += triangles;
+                }
+            }
         }
         if self.target.is_some() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -526,7 +537,8 @@ impl Renderer {
                 grid: self.grid,
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
-                target: self.target,
+                target: self.target.map(|t| t.hit(&self.scene.world)),
+                interaction: self.interaction_hint(),
                 time: &time,
                 lighting_pending: self.lighting.pending(),
             },
@@ -545,3 +557,9 @@ mod shadow_tests;
 #[cfg(test)]
 #[path = "water_tests.rs"]
 mod water_tests;
+
+#[path = "door_interaction.rs"]
+mod door_interaction;
+
+#[path = "door_validation.rs"]
+mod door_validation;

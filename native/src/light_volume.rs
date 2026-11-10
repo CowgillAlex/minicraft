@@ -105,13 +105,13 @@ impl LightVolume {
             applied: 0,
         }
     }
-    pub fn request(&mut self, world: &World, cell: [i32; 3]) {
+    pub fn request(&mut self, world: &World, cells: Vec<[i32; 3]>) {
         self.revision += 1;
         if let Some(jobs) = &self.jobs {
             let _ = jobs.send(LightJob {
                 revision: self.revision,
                 world: world.clone(),
-                edits: vec![cell],
+                edits: cells,
             });
         }
     }

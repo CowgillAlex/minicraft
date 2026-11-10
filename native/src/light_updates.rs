@@ -19,8 +19,8 @@ impl LightField {
         let mut dirty = [Vec::new(), Vec::new()];
         let mut targets = HashSet::new();
         let mut columns = HashSet::new();
-        for cell in edits {
-            let base = cell.map(|v| v / STEP);
+        let bases: HashSet<_> = edits.iter().map(|cell| cell.map(|v| v / STEP)).collect();
+        for base in bases {
             columns.insert([base[0] as usize, base[2] as usize]);
             for p in around(base, 1) {
                 let i = index(p[0], p[1], p[2]);

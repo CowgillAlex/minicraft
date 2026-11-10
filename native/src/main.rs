@@ -5,6 +5,8 @@ mod camera;
 mod capture;
 mod capture_views;
 mod daylight;
+mod door_gpu;
+mod doors;
 mod editing;
 mod hud;
 mod light_field;
@@ -13,6 +15,7 @@ mod mesh;
 mod occlusion;
 mod overlay;
 mod physics;
+mod picking;
 mod pipelines;
 mod ray;
 mod renderer;
@@ -298,6 +301,20 @@ impl ApplicationHandler for App {
                                 renderer.selected_material = crate::world::GLASS;
                             }
                         }
+                        KeyCode::KeyN => {
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.selected_material = world::HANDLE;
+                            }
+                        }
+                        KeyCode::KeyE if self.captured => {
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.interact_door(
+                                    &self.camera,
+                                    self.simulation.player.bounds(),
+                                    physics::Player::bounds_at(self.simulation.render_position()),
+                                );
+                            }
+                        }
                         KeyCode::KeyR => self.reset_player(),
                         KeyCode::KeyF if self.captured => self.simulation.toggle_flight(),
                         KeyCode::KeyO => {
@@ -401,6 +418,12 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
                     })
                     .transpose()?,
                 verify_edits: args.iter().any(|arg| arg == "--verify-edits"),
+                verify_doors: args.iter().any(|arg| arg == "--verify-doors"),
+                door: args
+                    .iter()
+                    .position(|arg| arg == "--door")
+                    .and_then(|i| args.get(i + 1))
+                    .map(String::as_str),
                 closeup: args.iter().any(|arg| arg == "--ao-closeup"),
                 ao_enabled: !args.iter().any(|arg| arg == "--no-ao"),
                 view: args

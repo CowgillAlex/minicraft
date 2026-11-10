@@ -39,7 +39,7 @@ impl Input {
         }
         Self {
             direction: direction.normalize_or_zero(),
-            jump: keys.contains(&KeyCode::Space) || keys.contains(&KeyCode::KeyE),
+            jump: keys.contains(&KeyCode::Space),
             descend: keys.contains(&KeyCode::ShiftLeft)
                 || keys.contains(&KeyCode::ShiftRight)
                 || keys.contains(&KeyCode::KeyQ),

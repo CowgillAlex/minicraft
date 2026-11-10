@@ -139,13 +139,13 @@ impl Mesh {
                             p[axis] += slice;
                             p[u] += i;
                             p[v] += j;
-                            let material = world.get(p[0], p[1], p[2]);
+                            let material = world.get_static(p[0], p[1], p[2]);
                             if material == AIR {
                                 continue;
                             }
                             let mut neighbor = p;
                             neighbor[axis] += sign;
-                            let other = world.get(neighbor[0], neighbor[1], neighbor[2]);
+                            let other = world.get_static(neighbor[0], neighbor[1], neighbor[2]);
                             if (material == world::GLASS && other != AIR)
                                 || (material != world::GLASS && world::opaque(other))
                             {
@@ -160,7 +160,7 @@ impl Mesh {
                                         let mut q = neighbor;
                                         q[u] += du;
                                         q[v] += dv;
-                                        let m = world.get(q[0], q[1], q[2]);
+                                        let m = world.get_static(q[0], q[1], q[2]);
                                         world::opaque(m) && m != WATER
                                     };
                                     let s1 = sample(*a, 0);
@@ -302,7 +302,7 @@ mod tests {
         assert_eq!(world.voxels, 1);
         world.set(1, 2, 3, AIR);
         assert_eq!(world.voxels, 0);
-        assert_eq!(world.get(-1, 0, 0), AIR);
+        assert_eq!(world.get_static(-1, 0, 0), AIR);
     }
 }
 

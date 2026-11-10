@@ -1,4 +1,7 @@
 use glam::Vec3;
+#[path = "door_world.rs"]
+mod door_world;
+pub use door_world::DoorAction;
 use std::{collections::HashSet, sync::Arc};
 
 pub const CHUNK: usize = 32;
@@ -25,6 +28,7 @@ pub const WALL: u8 = 12;
 pub const SAND: u8 = 13;
 
 pub const GLASS: u8 = 14;
+pub const HANDLE: u8 = 15;
 
 pub fn opaque(material: u8) -> bool {
     material != AIR && material != GLASS
@@ -33,6 +37,9 @@ pub fn opaque(material: u8) -> bool {
 #[derive(Clone)]
 pub struct World {
     chunks: Vec<Option<Arc<[u8]>>>,
+    door_chunks: Vec<Option<Arc<[u8]>>>,
+    pub doors: Vec<crate::doors::Door>,
+    loose_handles: HashSet<[i32; 3]>,
     pub emitters: HashSet<[i32; 3]>,
     pub voxels: usize,
 }
@@ -40,6 +47,9 @@ impl World {
     pub fn empty() -> Self {
         Self {
             chunks: vec![None; NX * NY * NZ],
+            door_chunks: vec![None; NX * NY * NZ],
+            doors: Vec::new(),
+            loose_handles: HashSet::new(),
             voxels: 0,
             emitters: HashSet::new(),
         }
@@ -55,6 +65,18 @@ impl World {
         ))
     }
     pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+        let Some((chunk, index)) = Self::address(x, y, z) else {
+            return AIR;
+        };
+        let material = self.chunks[chunk].as_ref().map_or(AIR, |data| data[index]);
+        if material != AIR {
+            return material;
+        }
+        self.door_chunks[chunk]
+            .as_ref()
+            .map_or(AIR, |data| data[index])
+    }
+    pub fn get_static(&self, x: i32, y: i32, z: i32) -> u8 {
         Self::address(x, y, z)
             .and_then(|(chunk, index)| self.chunks[chunk].as_ref().map(|data| data[index]))
             .unwrap_or(AIR)
@@ -75,6 +97,12 @@ impl World {
             }
             if material == LIGHT {
                 self.emitters.insert([x, y, z]);
+            }
+            if previous == HANDLE && material != HANDLE {
+                self.loose_handles.remove(&[x, y, z]);
+            }
+            if material == HANDLE {
+                self.loose_handles.insert([x, y, z]);
             }
         }
     }
@@ -218,12 +246,14 @@ impl World {
                             && y < base + 32
                             && (((z - cz).abs() >= 26 && ((x - cx).abs() - 18).abs() < 7)
                                 || ((x - cx).abs() >= 30 && (z - cz).abs() < 9));
-                        let door = z >= cz + 26 && (x - cx).abs() < 6 && y < base + 30;
+                        let door = z >= cz + 26 && x >= cx - 8 && x < cx + 8 && y < base + 34;
                         self.set(
                             x,
                             y,
                             z,
-                            if window {
+                            if door {
+                                AIR
+                            } else if window {
                                 let edge = y == base + 17
                                     || y == base + 31
                                     || ((z - cz).abs() >= 26
@@ -234,7 +264,7 @@ impl World {
                                 } else {
                                     GLASS
                                 }
-                            } else if door || y % 9 == 0 {
+                            } else if y % 9 == 0 {
                                 WOOD
                             } else {
                                 WALL
@@ -294,6 +324,15 @@ impl World {
                 self.set(x, h + 1, z, SAND);
             }
         }
+        for x in [cx - 9, cx + 8] {
+            self.cuboid([x, base + 2, cz + 26], [x, base + 34, cz + 28], WOOD);
+        }
+        self.cuboid(
+            [cx - 9, base + 34, cz + 26],
+            [cx + 8, base + 35, cz + 28],
+            WOOD,
+        );
+        self.install_door(crate::doors::Door::prefab([cx - 8, base + 2, cz + 26]));
     }
     fn tree(&mut self, x: i32, z: i32, seed: i32) {
         let base = terrain_height(x, z);
@@ -353,6 +392,7 @@ pub fn color(material: u8) -> [f32; 3] {
         WALL => [0.77, 0.68, 0.50],
         SAND => [0.59, 0.53, 0.35],
         GLASS => [0.55, 0.77, 0.82],
+        HANDLE => [0.82, 0.62, 0.25],
         _ => [1.0, 0.0, 1.0],
     }
 }

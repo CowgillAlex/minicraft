@@ -69,7 +69,7 @@ impl Layout {
     pub fn panel(&self, panel: Panel) -> Rect {
         let (w, h) = match panel {
             Panel::Pause => (360.0, 348.0),
-            Panel::Controls => (520.0, 478.0),
+            Panel::Controls => (520.0, 516.0),
             Panel::Settings => (440.0, 442.0),
         };
         Rect {
@@ -102,7 +102,7 @@ impl Layout {
                 add(216.0, "Controls", Action::Controls, false);
                 add(270.0, "Quit game", Action::Quit, false);
             }
-            Panel::Controls => add(410.0, "Back", Action::Back, false),
+            Panel::Controls => add(448.0, "Back", Action::Back, false),
             Panel::Settings => {
                 add(80.0, "Ambient occlusion", Action::AmbientOcclusion, false);
                 add(134.0, "VSync", Action::Vsync, false);
@@ -137,7 +137,7 @@ impl Layout {
             .map(|b| b.action)
     }
     pub fn hotbar(&self) -> Rect {
-        let w = editing::PALETTE.len() as f32 * 50.0 + 14.0;
+        let w = editing::PALETTE.len() as f32 * 46.0 + 14.0;
         Rect {
             x: (self.width - w) / 2.0,
             y: self.height - 86.0,
@@ -188,7 +188,7 @@ mod tests {
             Some(Action::LocalTime)
         );
         assert_eq!(
-            layout.action_at(Panel::Controls, [720.0, 643.0]),
+            layout.action_at(Panel::Controls, [720.0, 662.0]),
             Some(Action::Back)
         );
     }

@@ -3,7 +3,7 @@ use glam::{IVec3, Vec3};
 use std::collections::HashSet;
 
 pub const REACH: f32 = 8.0;
-pub const PALETTE: [u8; 11] = [
+pub const PALETTE: [u8; 12] = [
     world::STONE,
     world::GRASS,
     world::DIRT,
@@ -15,6 +15,7 @@ pub const PALETTE: [u8; 11] = [
     world::ROAD,
     world::LIGHT,
     world::GLASS,
+    world::HANDLE,
 ];
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
@@ -28,10 +29,24 @@ pub fn in_bounds(cell: [i32; 3]) -> bool {
 }
 
 /// Traverse voxel cells exactly, keeping the last empty cell for face-adjacent placement.
+#[cfg(test)]
 pub fn raycast(world: &World, origin: Vec3, direction: Vec3, reach: f32) -> Option<Hit> {
+    cast_cells(origin, direction, reach, |p| world.get(p[0], p[1], p[2]))
+}
+pub fn raycast_static(world: &World, origin: Vec3, direction: Vec3, reach: f32) -> Option<Hit> {
+    cast_cells(origin, direction, reach, |p| {
+        world.get_static(p[0], p[1], p[2])
+    })
+}
+fn cast_cells(
+    origin: Vec3,
+    direction: Vec3,
+    reach: f32,
+    get: impl Fn([i32; 3]) -> u8,
+) -> Option<Hit> {
     let mut adjacent = None;
     for (p, distance) in crate::ray::VoxelRay::new(origin, direction, reach) {
-        if world.get(p[0], p[1], p[2]) != AIR {
+        if get(p) != AIR {
             return Some(Hit {
                 cell: p,
                 adjacent,
@@ -81,6 +96,7 @@ pub fn material_name(material: u8) -> &'static str {
         world::ROAD => "ASPHALT",
         world::LIGHT => "LAMP",
         world::GLASS => "GLASS",
+        world::HANDLE => "HANDLE",
         world::WATER => "WATER",
         world::FLOWER => "FLOWER",
         world::PAINT => "ROAD PAINT",

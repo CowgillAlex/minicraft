@@ -227,3 +227,46 @@ fn axis_connections_preserve_fine_voxel_transmission() {
         );
     }
 }
+
+#[test]
+fn door_motion_updates_light_through_the_opening_and_matches_full_bakes() {
+    use crate::{doors::Door, physics::Aabb};
+    let mut world = World::empty();
+    for x in 312..=344 {
+        for y in 17..=52 {
+            for z in 288..=320 {
+                if x == 312 || x == 344 || y == 17 || y == 52 || z == 288 || z == 320 {
+                    world.set(x, y, z, world::STONE);
+                }
+            }
+        }
+    }
+    let mut door = Door::prefab([320, 18, 318]);
+    for x in 1..15 {
+        for y in 1..31 {
+            for z in 1..=2 {
+                door.set([x, y, z], world::WOOD);
+            }
+        }
+    }
+    world.install_door(door);
+    world.set(330, 34, 326, world::LIGHT);
+    let mut field = LightField::build(&world);
+    let mut displayed = field.pixels.clone();
+    let closed = field.at([330, 34, 310]);
+    assert_eq!(closed, [0, 0]);
+    let far = Aabb {
+        min: Vec3::splat(100.0),
+        max: Vec3::splat(101.0),
+    };
+    let (_, edits) = world.toggle_door(0, far, far);
+    check_update(&world, &mut field, &mut displayed, &edits);
+    let open = field.at([330, 34, 310]);
+    assert!(
+        open[0] > 0 && open[1] > 0,
+        "open door should admit lamp and sky light: {open:?}"
+    );
+    let (_, edits) = world.toggle_door(0, far, far);
+    check_update(&world, &mut field, &mut displayed, &edits);
+    assert_eq!(field.at([330, 34, 310]), closed);
+}

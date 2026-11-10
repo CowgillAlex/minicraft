@@ -1,7 +1,7 @@
-MINICRAFT v0.4.1
+MINICRAFT v0.5.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.4.1-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.5.0-windows-x64.exe. No installer or extra asset files.
 The world and lighting take a few seconds to generate when starting.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
@@ -18,10 +18,11 @@ CONTROLS
 Play / Back to world / Enter: capture mouse
 WASD: move horizontally
 Mouse: look
-Space / E: jump (fly up in flight mode)
+Space: jump (fly up in flight mode)
 Shift / Q: slow walk (fly down in flight mode)
 Ctrl: sprint / flight boost
 F: toggle walking / flight, both with collisions
+E: open / close the targeted door
 Scroll: change movement speed
 Esc: world menu / back
 - / =: move time backward / forward. Hold to advance faster.
@@ -40,7 +41,26 @@ Right click: place one voxel against the targeted face
 Middle click: pick the targeted material
 1-0: Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
 B: select Glass
+N: select Handle
 A mint outline highlights the target within 8 metres. Edits reset on exit.
+
+DOORS
+Doors are individual editable voxel objects. E operates any targeted part.
+Left/right click breaks/places one voxel, including on open doors. Materials,
+glass and holes stay with the panel when it swings.
+
+Build your own door with a 16 x 32 voxel wooden outline, two voxels deep.
+Keep the outer perimeter wood on both layers. Fill the inside however you
+like. Select Handle with N and place it halfway up a vertical side, at row
+15 or 16 from the bottom. The hinge is assigned to the opposite side.
+All four horizontal facings work. Completing a frame after its handle also
+recognizes it. The first version uses this standard 1 x 2 metre size.
+
+Breaking the wooden perimeter or removing all attached handles disables
+opening/closing. Repairing restores it. A broken door stays hanging in its
+current state. Doors cannot move to a position occupied by you or blocks.
+Collision/light use the open/closed states; the visible swing is animated.
+Door edits and states reset when you exit.
 
 LIGHTING
 Street lamps and ceiling lamps cast warm white light onto nearby surfaces.
