@@ -29,7 +29,9 @@ pub struct SceneMesh {
 impl SceneMesh {
     pub fn new(device: &wgpu::Device, world: World) -> Self {
         let mut mesh = Mesh::build(&world);
-        mesh.add_horizon();
+        if world.noise_preview.is_none() {
+            mesh.add_horizon();
+        }
         println!(
             "{} opaque / {} glass triangles in {} chunks",
             mesh.indices.len() / 3,

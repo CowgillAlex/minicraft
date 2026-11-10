@@ -36,7 +36,12 @@ fn brightness(data: &[u8]) -> f32 {
 #[ignore = "requires a Vulkan/DirectX-capable GPU or software Vulkan adapter"]
 fn water_receives_shadows_in_daylight_and_at_night() {
     let instance = wgpu::Instance::default();
-    let mut renderer = pollster::block_on(Renderer::new(&instance, None)).unwrap();
+    let mut renderer = pollster::block_on(Renderer::new(
+        &instance,
+        None,
+        crate::worldgen::preview::Scene::Village,
+    ))
+    .unwrap();
     renderer.hud_enabled = false;
     let camera = looking_at(Vec3::new(0.0, 1.8, 2.0), Vec3::new(0.0, 17.0 / 16.0, 0.0));
     for hour in [12.0, 3.0] {

@@ -3,6 +3,7 @@ use std::{fs::File, io::BufWriter, path::Path, sync::mpsc, time::Instant};
 
 /// Render through the same GPU pipelines without a desktop window, for validation.
 pub struct CaptureOptions<'a> {
+    pub scene: crate::worldgen::preview::Scene,
     pub frames: u32,
     pub ui: Option<&'a str>,
     pub size: Option<(u32, u32)>,
@@ -16,6 +17,7 @@ pub struct CaptureOptions<'a> {
 }
 pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     let CaptureOptions {
+        scene,
         frames,
         ui,
         size,
@@ -28,7 +30,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         hours,
     } = options;
     let instance = wgpu::Instance::default();
-    let mut renderer = pollster::block_on(Renderer::new(&instance, None))?;
+    let mut renderer = pollster::block_on(Renderer::new(&instance, None, scene))?;
     let (width, height) = size.unwrap_or((1280, 800));
     if !(320..=7680).contains(&width) || !(240..=4320).contains(&height) {
         return Err("Capture dimensions must be between 320x240 and 7680x4320".into());

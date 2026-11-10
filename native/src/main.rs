@@ -25,6 +25,7 @@ mod ui;
 mod ui_icons;
 mod ui_menu;
 mod world;
+mod worldgen;
 
 use camera::Camera;
 use renderer::{FrameInfo, Renderer};
@@ -39,6 +40,7 @@ use winit::{
 };
 
 struct App {
+    scene: worldgen::preview::Scene,
     instance: wgpu::Instance,
     window: Option<Arc<Window>>,
     surface: Option<wgpu::Surface<'static>>,
@@ -57,8 +59,9 @@ struct App {
     error: Option<String>,
 }
 impl App {
-    fn new() -> Self {
+    fn new(scene: worldgen::preview::Scene) -> Self {
         Self {
+            scene,
             instance: wgpu::Instance::default(),
             window: None,
             surface: None,
@@ -168,7 +171,8 @@ impl ApplicationHandler for App {
                 )?,
             );
             let surface = self.instance.create_surface(window.clone())?;
-            let renderer = pollster::block_on(Renderer::new(&self.instance, Some(&surface)))?;
+            let renderer =
+                pollster::block_on(Renderer::new(&self.instance, Some(&surface), self.scene))?;
             let size = window.inner_size();
             self.config = Some(wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -382,6 +386,40 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
         println!("MiniCraft v{}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    let scene = worldgen::preview::Scene::from_args(&args)?;
+    if let worldgen::preview::Scene::Noise(preview) = scene {
+        if args.iter().any(|arg| arg == "--noise-benchmark") {
+            return preview.benchmark().map_err(Into::into);
+        }
+        if let Some(index) = args.iter().position(|arg| arg == "--noise-sample") {
+            let point: [f64; 3] = args
+                .get(index + 1)
+                .ok_or("--noise-sample needs X,Y,Z")?
+                .split(',')
+                .map(str::parse::<f64>)
+                .collect::<std::result::Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| "--noise-sample needs exactly three coordinates")?;
+            if point
+                .into_iter()
+                .any(|v| !v.is_finite() || v.abs() > 30_000_000.0)
+            {
+                return Err(
+                    "Sample coordinates must be finite and within 30 million metres".into(),
+                );
+            }
+            let generator = worldgen::Generator::new(preview.seed)?;
+            let mut sampler = generator.sampler();
+            println!(
+                "seed {}, point {:?}, density {:.17}, material {}",
+                preview.seed,
+                point,
+                sampler.density(point),
+                sampler.material(point)
+            );
+            return Ok(());
+        }
+    }
     if let Some(index) = args.iter().position(|arg| arg == "--screenshot") {
         let path = args.get(index + 1).ok_or("--screenshot needs a PNG path")?;
         let frames = args
@@ -402,6 +440,7 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
         return capture::capture(
             std::path::Path::new(path),
             capture::CaptureOptions {
+                scene,
                 frames,
                 ui: args
                     .iter()
@@ -437,7 +476,7 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
     }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = App::new();
+    let mut app = App::new(scene);
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {
         return Err(error.into());

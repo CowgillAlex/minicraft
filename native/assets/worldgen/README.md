@@ -1,0 +1,13 @@
+# Worldgen source
+
+Ported from Alex's [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), commit `d681c0532d5e2628c70e6de7fad7df31f64ea705`.
+
+`overworld.json` packages the original Overworld height/sea-level settings and five density-router roots: final density, initial density without jaggedness, barrier, fluid-level floodedness and fluid-level spread. Its 19 referenced density definitions and 28 noise definitions are copied from `assets/data/minecraft/worldgen`. Names retain their original paths, with the `minecraft:` namespace retained inside references. Unused router roots and feature/surface data are excluded.
+
+The Rust port follows `VanillaNoiseStep.java`, `VanillaAquifer.java`, `Xoroshiro.java`, `ImprovedNoise.java`, `PerlinNoise.java` and `NormalNoise.java`. ImprovedNoise uses the exact gradient table from `SimplexNoise.java`. This preserves the project's own RNG and noise behavior, including details which may differ from other Minecraft implementations.
+
+The intended changes for MiniCraft are fractional metre coordinates and 3D interpolation. Java's integer X/Y density adapter becomes a double-coordinate adapter; its bilinear 4 × 8 cell interpolation becomes trilinear 4 × 8 × 4 interpolation. No new noise or terrain-detail layer is added. At Z=0 the original interpolation arithmetic is preserved. Aquifer locations and pressure rules remain the source's collapsed X/Y algorithm, rather than inventing a new fluid distribution during this port. Java's unimplemented lava band remains air. Noise/material evaluation covers the original vertical range of -64 to 320 metres.
+
+`java-slice.json` contains output from the unmodified Java noise and aquifer classes. `java-continuous.json` uses the same Java code with only the coordinate type and interpolation adapter changed. Both include named RNG outputs for the same six seeds. Density checks allow `1e-12` floating-point error; material IDs must match exactly. These are reference outputs, not Rust-generated snapshots.
+
+`scripts/worldgen-reference.py` fetches source content from the pinned commit in an existing local reference checkout and compiles it in a temporary directory. Small LibGDX/registry stubs supply file reads, configuration loading and material IDs without starting the old game. Its unused JsonValue entry points throw if called. The script needs a JDK and Gson but the game and ordinary Rust tests do not. Run it from any directory with the reference repository path as its argument.

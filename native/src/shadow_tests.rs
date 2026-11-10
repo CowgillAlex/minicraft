@@ -99,7 +99,12 @@ fn scene(renderer: &mut Renderer, world: World) {
 #[ignore = "requires a Vulkan/DirectX-capable GPU or software Vulkan adapter"]
 fn shadow_receivers_are_lit_at_multiple_angles_and_real_occluders_still_cast() {
     let instance = wgpu::Instance::default();
-    let mut renderer = pollster::block_on(Renderer::new(&instance, None)).unwrap();
+    let mut renderer = pollster::block_on(Renderer::new(
+        &instance,
+        None,
+        crate::worldgen::preview::Scene::Village,
+    ))
+    .unwrap();
     renderer.daylight.hours = 14.0;
     renderer.hud_enabled = false;
     renderer.ao_enabled = false;

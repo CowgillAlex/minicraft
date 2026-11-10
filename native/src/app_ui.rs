@@ -12,7 +12,11 @@ impl App {
         if let Some(renderer) = &self.renderer {
             self.simulation.reset(renderer.world());
             let position = self.simulation.eye_position();
-            let direction = (crate::world::World::meters(155, 40, 205) - position).normalize();
+            let direction = if renderer.world().noise_preview.is_some() {
+                glam::Vec3::new(1.0, -0.12, -0.7).normalize()
+            } else {
+                (crate::world::World::meters(155, 40, 205) - position).normalize()
+            };
             self.camera = crate::camera::Camera {
                 position,
                 yaw: direction.z.atan2(direction.x),

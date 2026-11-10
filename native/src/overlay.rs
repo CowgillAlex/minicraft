@@ -8,6 +8,7 @@ pub const TEXT: [f32; 4] = [0.94, 0.95, 0.93, 1.0];
 pub const MUTED: [f32; 4] = [0.60, 0.65, 0.65, 1.0];
 pub const ACCENT: [f32; 4] = [0.65, 0.84, 0.66, 1.0];
 pub struct OverlayStats<'a> {
+    pub noise_preview: Option<crate::worldgen::preview::Preview>,
     pub voxels: usize,
     pub triangles: usize,
     pub chunks: usize,
@@ -34,6 +35,15 @@ pub fn vertices(
     let shadow = [0.0, 0.0, 0.0, 0.65];
     hud.styled_text("MiniCraft", 25.0, 25.0, 16.0, shadow, true);
     hud.styled_text("MiniCraft", 24.0, 24.0, 16.0, [0.94, 0.95, 0.93, 0.8], true);
+    if let Some(preview) = stats.noise_preview {
+        hud.text(
+            &format!("Noise preview / Seed {}", preview.seed),
+            24.0,
+            46.0,
+            11.0,
+            MUTED,
+        );
+    }
     let clock = Rect {
         x: layout.width - 124.0,
         y: 20.0,
@@ -211,6 +221,16 @@ fn debug(
     vsync: bool,
     ui: &UiState,
 ) {
+    let position = if let Some(preview) = stats.noise_preview {
+        camera.position
+            + glam::Vec3::new(
+                preview.origin[0] as f32 + crate::world::WIDTH as f32 / 32.0,
+                preview.origin[1] as f32,
+                preview.origin[2] as f32 + crate::world::DEPTH as f32 / 32.0,
+            )
+    } else {
+        camera.position
+    };
     let rows = [
         format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")),
         format!(
@@ -232,7 +252,7 @@ fn debug(
         format!("{:.2}M voxels", stats.voxels as f32 / 1e6),
         format!(
             "XYZ  {:.1}  {:.1}  {:.1}",
-            camera.position.x, camera.position.y, camera.position.z
+            position.x, position.y, position.z
         ),
         format!(
             "AO {}  /  VSync {}",

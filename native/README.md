@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.5.0 explores a finite 40 × 40 metre landscape with cabins, a winding road, trees, lamps, water, and a footbridge. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.6.0 opens a finite 40 × 12 × 40 metre noise preview containing only stone, water, and air. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -28,6 +28,36 @@ The playing HUD contains a compact bottom hotbar with isometric material preview
 
 F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordinates, target data, and the 20 TPS tick count/grounded state. FPS includes display synchronization when VSync is enabled. Scene generation happens at startup and is not included in FPS.
 
+## Noise preview
+
+The default scene ports the terrain density and aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates only stone, water and air. There are no surface layers, biomes applied as materials, ores, structures, vegetation, or decoration. Existing editing materials and renderer effects remain available.
+
+One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. The aquifer deliberately retains the source's X/Y layout, including its empty lava band. It does not yet add a new 3D aquifer algorithm.
+
+The generator uses the reference vertical range of -64 to 320 metres. The playable preview displays a **40 × 12 × 40 metre window** of that field. It does not load the full 384 metre height, stream terrain, save edits, or generate infinite worlds yet. This separates checking the port from the upcoming chunk-storage and streaming changes. Default seed 1 and origin `120,58,-20` show terrain near sea level. F3 reports reference-world coordinates; rendering and physics use local coordinates within the window.
+
+```sh
+cargo run --release --locked
+cargo run --release --locked -- --seed 1 --origin 120,58,-20
+cargo run --release --locked -- --seed 12345 --origin 0,-32,0
+cargo run --release --locked -- --noise-sample 120.0625,63,0
+cargo run --release --locked -- --noise-benchmark
+cargo run --release --locked -- --screenshot noise.png --time 12 --frames 3
+cargo run --release --locked -- --scene village
+```
+
+`--seed` accepts a signed 64-bit integer. `--origin` is the lower window corner in integer metre coordinates, with Y between -64 and 308. `--noise-sample` accepts fractional metre coordinates and prints final density and material ID: air 0, stone 3, water 10. `--noise-benchmark` fills a single 32³-voxel page at the selected origin without starting the GPU. Use `--origin` to measure different terrain regions.
+
+Startup generation uses a bounded CPU worker pool with at most eight workers and leaves two logical CPUs available when possible. Workers share an immutable graph and own their caches. Each job fills a 2 metre page at full voxel resolution; a bounded result channel limits queued page memory. Generation finishes before play. This is not yet a streaming scheduler. No extra approximation, noise substitution, or coarse upscaling is applied to the resulting voxel field.
+
+Parity tests use 1,932 density/material samples produced by the original Java implementation, plus 3,564 fractional samples from that implementation with only its coordinate/interpolation adapter changed for 3D. Fixtures cover six seeds including signed extremes, negative coordinates, cave depths, sea level and interpolation boundaries. They check density within `1e-12` and materials exactly. To regenerate them with a JDK and Gson installed:
+
+```sh
+python3 scripts/worldgen-reference.py /path/to/Paper-Minecraft
+```
+
+Source details and the adapter changes are recorded in [the worldgen asset notes](assets/worldgen/README.md).
+
 ## Renderer
 
 - Sparse allocation of 32³-voxel chunks, with one byte per material cell. Chunks use copy-on-write storage so lighting workers can read a consistent snapshot without copying the whole world on every edit.
@@ -39,7 +69,7 @@ F3 shows FPS, frame interval, resident voxels, visible triangles/chunks, coordin
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
 - Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
 
-This is a rasterized mesh renderer. The generated world extent and material palette are fixed; time of day and voxel edits are interactive. There is no streaming, level of detail, persistent saves, AI, or car simulation yet.
+This is a rasterized mesh renderer. The preview extent and editable material palette are fixed; time of day and voxel edits are interactive. There is no streaming, level of detail, persistent saves, AI, or car simulation yet.
 
 ## Editable doors
 
@@ -79,24 +109,24 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --release --locked shadow_receivers -- --ignored --nocapture
 cargo test --release --locked water_receives_shadows -- --ignored --nocapture
 cargo test --release --locked benchmark_lighting_edits -- --ignored --nocapture
-cargo run --release --locked -- --screenshot scene.png --frames 3
-cargo run --release --locked -- --screenshot edits.png --verify-edits
-cargo run --release --locked -- --screenshot doors.png --view door --verify-doors
-cargo run --release --locked -- --screenshot door-open.png --view door --door open
-cargo run --release --locked -- --screenshot door-broken.png --view door-side --door broken
-cargo run --release --locked -- --screenshot recess.png --ao-closeup
-cargo run --release --locked -- --screenshot recess-no-ao.png --ao-closeup --no-ao
-cargo run --release --locked -- --screenshot house.png --shadow-view house
-cargo run --release --locked -- --screenshot terrain.png --shadow-view terrain
-cargo run --release --locked -- --screenshot leaves.png --shadow-view leaves
-cargo run --release --locked -- --screenshot night.png --view street --time 21
-cargo run --release --locked -- --screenshot water-night.png --view water --time 3
-cargo run --release --locked -- --screenshot menu.png --ui pause
-cargo run --release --locked -- --screenshot settings.png --ui settings --size 800x600
-cargo run --release --locked -- --screenshot controls.png --ui controls
-cargo run --release --locked -- --screenshot debug.png --ui debug
-cargo run --release --locked -- --screenshot inside.png --view interior --time 21
-cargo run --release --locked -- --screenshot glass.png --view window --time 12
+cargo run --release --locked -- --scene village --screenshot scene.png --frames 3
+cargo run --release --locked -- --scene village --screenshot edits.png --verify-edits
+cargo run --release --locked -- --scene village --screenshot doors.png --view door --verify-doors
+cargo run --release --locked -- --scene village --screenshot door-open.png --view door --door open
+cargo run --release --locked -- --scene village --screenshot door-broken.png --view door-side --door broken
+cargo run --release --locked -- --scene village --screenshot recess.png --ao-closeup
+cargo run --release --locked -- --scene village --screenshot recess-no-ao.png --ao-closeup --no-ao
+cargo run --release --locked -- --scene village --screenshot house.png --shadow-view house
+cargo run --release --locked -- --scene village --screenshot terrain.png --shadow-view terrain
+cargo run --release --locked -- --scene village --screenshot leaves.png --shadow-view leaves
+cargo run --release --locked -- --scene village --screenshot night.png --view street --time 21
+cargo run --release --locked -- --scene village --screenshot water-night.png --view water --time 3
+cargo run --release --locked -- --scene village --screenshot menu.png --ui pause
+cargo run --release --locked -- --scene village --screenshot settings.png --ui settings --size 800x600
+cargo run --release --locked -- --scene village --screenshot controls.png --ui controls
+cargo run --release --locked -- --scene village --screenshot debug.png --ui debug
+cargo run --release --locked -- --scene village --screenshot inside.png --view interior --time 21
+cargo run --release --locked -- --scene village --screenshot glass.png --view window --time 12
 ```
 
 Door tests cover structural damage/repair, custom frame recognition, both hinge sides, all four facings, local picking during a swing, blocking closes, walkable cabin entrances, source tracking and incremental lighting equivalence. The --verify-doors capture drives the live interaction, picking, editing, mesh and light paths through opening, breaking and repairing a frame/handle, blocking a close and closing again.
@@ -115,7 +145,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC an
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.5.0/minicraft-v0.5.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.6.0/minicraft-v0.6.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the notice.
 

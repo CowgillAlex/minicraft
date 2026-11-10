@@ -1,8 +1,8 @@
-MINICRAFT v0.5.0
+MINICRAFT v0.6.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.5.0-windows-x64.exe. No installer or extra asset files.
-The world and lighting take a few seconds to generate when starting.
+Run minicraft-v0.6.0-windows-x64.exe. No installer or extra asset files.
+The world and lighting generate before play; noise generation uses CPU workers.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
@@ -84,7 +84,21 @@ not a separate ray-traced point shadow for every lamp.
 
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
-The finite 40 x 40 metre scene has terrain, cabins, roads, trees and a pond.
+The default scene is a finite 40 x 12 x 40 metre noise preview containing
+only stone, water and air. It ports the Paper-Minecraft PR #1 density graph
+and aquifer rules. Terrain is sampled every 6.25 cm at its original scale.
+Seed 1, origin 120,58,-20. This is a window into the -64 to 320 metre field;
+it does not load the full height or support infinite streaming yet.
+
+Optional launch arguments:
+--seed 1 --origin 120,58,-20    Choose a seed and lower window corner in metres.
+--scene village               Open the previous village with doors and lamps.
+--noise-sample 120.0625,63,0   Print density and material without a GPU.
+--noise-benchmark             Measure a 32-cubed voxel page without a GPU.
+
+The source aquifer keeps its original X/Y layout in this first port.
+There are no generated surfaces, ores, buildings, trees or other features
+in the noise preview. All existing building materials remain selectable.
 Walking has gravity, jumping, wall sliding and half-metre step-up. Both
 walking and flight collide with individual fine voxels, including glass.
 Water and flowers do not collide; swimming is not simulated yet.

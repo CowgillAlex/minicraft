@@ -42,6 +42,7 @@ pub struct World {
     loose_handles: HashSet<[i32; 3]>,
     pub emitters: HashSet<[i32; 3]>,
     pub voxels: usize,
+    pub noise_preview: Option<crate::worldgen::preview::Preview>,
 }
 impl World {
     pub fn empty() -> Self {
@@ -52,6 +53,14 @@ impl World {
             loose_handles: HashSet::new(),
             voxels: 0,
             emitters: HashSet::new(),
+            noise_preview: None,
+        }
+    }
+    pub(crate) fn insert_chunk(&mut self, chunk: [usize; 3], data: Vec<u8>) {
+        let count = data.iter().filter(|v| **v != AIR).count();
+        if count > 0 {
+            self.voxels += count;
+            self.chunks[chunk[0] + NX * chunk[2] + NX * NZ * chunk[1]] = Some(Arc::from(data));
         }
     }
     fn address(x: i32, y: i32, z: i32) -> Option<(usize, usize)> {

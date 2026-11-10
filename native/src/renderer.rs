@@ -72,6 +72,7 @@ impl Renderer {
     pub async fn new(
         instance: &wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
+        source: crate::worldgen::preview::Scene,
     ) -> Result<Self> {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -106,7 +107,7 @@ impl Renderer {
             .await?;
         let start = Instant::now();
         println!("Generating 6.25 cm voxel world...");
-        let world = World::generate();
+        let world = source.build()?;
         let voxel_count = world.voxels;
         println!(
             "{} voxels generated in {:.2}s. Meshing...",
@@ -530,6 +531,7 @@ impl Renderer {
             captured,
             vsync,
             crate::overlay::OverlayStats {
+                noise_preview: self.scene.world.noise_preview,
                 voxels: self.scene.world.voxels,
                 triangles: self.visible_triangles,
                 chunks: self.visible_chunks,
