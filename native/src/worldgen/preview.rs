@@ -1,4 +1,6 @@
-use super::{Generator, TerrainSampler};
+use super::Generator;
+#[cfg(test)]
+use super::TerrainSampler;
 use crate::world::{self, World, CHUNK};
 use std::{
     sync::{
@@ -14,13 +16,17 @@ pub struct Preview {
     pub seed: i64,
     /// Lower corner in the reference generator's metre coordinates.
     pub origin: [i32; 3],
+    pub height_m: i32,
+    pub reference: bool,
 }
 
 impl Default for Preview {
     fn default() -> Self {
         Self {
             seed: 1,
-            origin: [120, 58, -20],
+            origin: [120, -64, -20],
+            height_m: 384,
+            reference: false,
         }
     }
 }
@@ -47,6 +53,17 @@ impl Scene {
             "village" => Ok(Self::Village),
             "noise" => {
                 let mut preview = Preview::default();
+                if let Some(height) = value("--height")? {
+                    preview.height_m = height
+                        .parse()
+                        .map_err(|_| "--height needs a number of metres")?;
+                } else if value("--origin")?.is_some() {
+                    preview.height_m = 12;
+                }
+                if preview.height_m != 384 {
+                    preview.origin[1] = 58;
+                }
+                preview.reference = args.iter().any(|v| v == "--reference-worldgen");
                 if let Some(seed) = value("--seed")? {
                     preview.seed = seed
                         .parse()
@@ -61,9 +78,14 @@ impl Scene {
                         .try_into()
                         .map_err(|_| "--origin needs exactly three coordinates")?;
                 }
-                if !(-64..=308).contains(&preview.origin[1]) {
+                if preview.height_m < 2 || preview.height_m > 384 || preview.height_m % 2 != 0 {
                     return Err(
-                        "--origin Y must be between -64 and 308 for this finite preview".into(),
+                        "--height must be an even number of metres between 2 and 384".into(),
+                    );
+                }
+                if !(-64..=320 - preview.height_m).contains(&preview.origin[1]) {
+                    return Err(
+                        "The preview must fit in the -64 to 320 metre vertical range".into(),
                     );
                 }
                 if preview
@@ -97,7 +119,7 @@ impl Preview {
         progress.check()?;
         progress.begin(
             crate::startup::Stage::Terrain,
-            world::NX * world::NY * world::NZ,
+            world::NX * self.height_m as usize / 2 * world::NZ,
         );
         let generator = Generator::new(self.seed)?;
         let workers = thread::available_parallelism()
@@ -105,7 +127,10 @@ impl Preview {
             .saturating_sub(2)
             .clamp(1, 8);
         let next = AtomicUsize::new(0);
-        let mut world = World::empty();
+        let mut world = World::with_height(self.height_m * 16);
+        let chunks_y = world.chunks_y();
+        let mut evaluated = 0_usize;
+        let mut uniform = 0_usize;
         world.noise_preview = Some(self);
         println!(
             "Noise preview: seed {}, origin {:?} metres, {workers} workers",
@@ -124,7 +149,7 @@ impl Preview {
                             break;
                         }
                         let index = next.fetch_add(1, Ordering::Relaxed);
-                        if index >= world::NX * world::NY * world::NZ {
+                        if index >= world::NX * chunks_y * world::NZ {
                             break;
                         }
                         let chunk = [
@@ -132,11 +157,14 @@ impl Preview {
                             index / (world::NX * world::NZ),
                             index / world::NX % world::NZ,
                         ];
-                        let data = self.page(&mut sampler, chunk.map(|v| v as i32 * CHUNK as i32));
+                        let data = super::page::generate(
+                            self,
+                            &mut sampler,
+                            chunk.map(|v| v as i32 * CHUNK as i32),
+                        );
                         if sender.send((chunk, data)).is_err() {
                             break;
                         }
-                        sampler.clear_density_cache();
                     }
                 });
             }
@@ -145,37 +173,31 @@ impl Preview {
                 if progress.check().is_err() {
                     break;
                 }
-                world.insert_chunk(chunk, data);
+                evaluated += data.evaluated;
+                uniform += usize::from(data.evaluated == 0);
+                world.insert_chunk(chunk, data.data);
                 progress.advance();
             }
             drop(receiver);
         });
         progress.check()?;
+        println!(
+            "Generation: {evaluated} fine samples, {uniform} uniform pages, {} metres tall",
+            self.height_m
+        );
         Ok(world)
     }
 
+    #[cfg(test)]
     pub(super) fn page(self, sampler: &mut TerrainSampler<'_>, origin: [i32; 3]) -> Vec<u8> {
-        let mut cells = vec![world::AIR; CHUNK.pow(3)];
-        for y in 0..CHUNK {
-            for z in 0..CHUNK {
-                for x in 0..CHUNK {
-                    let cell = [
-                        origin[0] + x as i32,
-                        origin[1] + y as i32,
-                        origin[2] + z as i32,
-                    ];
-                    cells[x + CHUNK * (z + CHUNK * y)] = sampler.material(self.point(cell));
-                }
-            }
-        }
-        cells
+        super::page::generate(self, sampler, origin).data.to_vec()
     }
 
     pub fn benchmark(self) -> Result<(), String> {
         let start = Instant::now();
         let generator = Generator::new(self.seed)?;
         let mut sampler = generator.sampler();
-        let cells = self.page(&mut sampler, [0; 3]);
+        let cells = super::page::reference(self, &mut sampler, [0; 3]);
         let elapsed = start.elapsed();
         let stone = cells.iter().filter(|v| **v == world::STONE).count();
         let water = cells.iter().filter(|v| **v == world::WATER).count();

@@ -102,7 +102,7 @@ impl Renderer {
         );
         progress.begin(
             crate::startup::Stage::Mesh,
-            crate::world::NX * crate::world::NY * crate::world::NZ,
+            crate::world::NX * world.chunks_y() * crate::world::NZ,
         );
         let scene = SceneMesh::new_with_progress(&device, world, progress)?;
         println!("World meshed in {:.2}s", start.elapsed().as_secs_f32());
@@ -258,10 +258,13 @@ impl Renderer {
     pub fn world(&self) -> &World {
         &self.scene.world
     }
+    pub fn show_notice(&mut self, message: &'static str) {
+        self.door_notice = Some((message, Instant::now()));
+    }
     pub fn target_cell(&self, camera: &Camera, place: bool) -> Option<[i32; 3]> {
         let target = picking::cast(&self.scene.world, &self.door_meshes, camera)?;
         let hit = target.hit(&self.scene.world);
-        editing::edit_cell(hit, camera.position, place)
+        editing::edit_cell(hit, camera.position, place, self.scene.world.height())
     }
     pub fn edit(&mut self, camera: &Camera, place: bool) -> bool {
         let Some(cell) = self.target_cell(camera, place) else {
@@ -294,6 +297,21 @@ impl Renderer {
     pub fn finish_lighting(&mut self) {
         self.lighting.wait(&self.queue);
     }
+    pub fn finish_meshes(&mut self, camera: &Camera) -> Result<()> {
+        let start = Instant::now();
+        loop {
+            if self.scene.update_stream(&self.device, camera.position) {
+                self.shadow_ready = false;
+            }
+            if !self.scene.meshes_pending() {
+                return Ok(());
+            }
+            if start.elapsed().as_secs() > 120 {
+                return Err("Timed out waiting for nearby meshes".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
     pub fn pick_material(&mut self, camera: &Camera) {
         if let Some(target) = picking::cast(&self.scene.world, &self.door_meshes, camera) {
             self.selected_material = target.material(&self.scene.world);
@@ -304,6 +322,9 @@ impl Renderer {
             self.shadow_ready = false;
         }
         self.lighting.poll(&self.queue);
+        if self.scene.update_stream(&self.device, camera.position) {
+            self.shadow_ready = false;
+        }
         self.sync_doors();
         let FrameInfo {
             size: (width, height),
@@ -318,7 +339,15 @@ impl Renderer {
             .resize(&self.device, &targets.depth, (width, height));
         let matrix = camera.matrix(width as f32 / height as f32);
         let (sun, power, color, daylight) = self.daylight.parameters();
-        let light_matrix = Daylight::light_matrix(sun);
+        let light_matrix = if self.scene.world.height() > crate::world::HEIGHT {
+            let top = self.scene.world.max_occupied_y as f32 * crate::world::VOXEL;
+            let focus = glam::Vec3::Y * (top / 2.0);
+            let radius = glam::Vec3::new(20.0, top / 2.0, 20.0).length() + 4.0;
+            glam::Mat4::orthographic_rh(-radius, radius, -radius, radius, 0.1, radius * 2.0 + 64.0)
+                * glam::Mat4::look_at_rh(focus + sun * (radius + 32.0), focus, glam::Vec3::Y)
+        } else {
+            Daylight::light_matrix(sun)
+        };
         self.queue.write_buffer(
             &self.uniform,
             0,
@@ -548,6 +577,7 @@ impl Renderer {
                 interaction: self.interaction_hint(),
                 time: &time,
                 lighting_pending: self.lighting.pending(),
+                meshes_pending: self.scene.meshes_pending(),
             },
             &self.ui,
         );

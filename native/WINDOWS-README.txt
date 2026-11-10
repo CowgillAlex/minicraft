@@ -1,12 +1,14 @@
-MINICRAFT v0.7.0
+MINICRAFT v0.8.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.7.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.8.0-windows-x64.exe. No installer or extra asset files.
 The window opens before terrain generation. A dark loading screen shows
 terrain/mesh page counts, lighting and graphics preparation, and elapsed time.
 Generation and GPU preparation run in the background. Resize, minimize or
 close the window normally; Escape cancels loading. The normal world menu
-appears when ready. Sampling cost is unchanged in this build.
+appears when ready. Full-height terrain now uses cached interpolation, exact
+uniform-region skipping and compressed uniform pages. Nearby meshes stream
+as you move; terrain material generation finishes before play.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
@@ -26,6 +28,8 @@ Space: jump (fly up in flight mode)
 Shift / Q: slow walk (fly down in flight mode)
 Ctrl: sprint / flight boost
 F: toggle walking / flight, both with collisions
+F5: toggle spectator, pass through terrain without gravity
+    Uses flight controls. Move into clear space inside the world to exit.
 E: open / close the targeted door
 Scroll: change movement speed
 Esc: world menu / back
@@ -88,17 +92,24 @@ not a separate ray-traced point shadow for every lamp.
 
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
-The default scene is a finite 40 x 12 x 40 metre noise preview containing
+The default scene is a finite 40 x 384 x 40 metre noise preview containing
 only stone, water and air. It ports the Paper-Minecraft PR #1 density graph
 and aquifer rules. Terrain is sampled every 6.25 cm at its original scale.
-Seed 1, origin 120,58,-20. This is a window into the -64 to 320 metre field;
-it does not load the full height or support infinite streaming yet.
+Seed 1, origin 120,-64,-20. The full -64 to 320 metre range is loaded.
+Uniform 2 metre pages use one material value; mixed pages retain fine voxels.
+Nearby meshes stream within 28 metres. Fog hides the cache boundary.
+Horizontal infinite generation and persistent saves are not implemented.
 
 Optional launch arguments:
---seed 1 --origin 120,58,-20    Choose a seed and lower window corner in metres.
+--seed 1                     Choose a signed 64-bit seed.
+--height 12                  Use the old short preview near sea level.
+--origin 120,58,-20           Choose lower corner; defaults to 12m height.
+--height 384 --origin 0,-64,0 Choose another full-height column.
 --scene village               Open the previous village with doors and lamps.
 --noise-sample 120.0625,63,0   Print density and material without a GPU.
 --noise-benchmark             Measure a 32-cubed voxel page without a GPU.
+--worldgen-benchmark          Time generation of the selected entire volume.
+--reference-worldgen         Disable uniform skipping/prepared evaluation.
 
 Aquifers now use 3D seeded cells, full X/Z surface checks and 3D pressure
 barriers. Fluid regions vary along both horizontal axes instead of extruding
@@ -112,7 +123,7 @@ walking and flight collide with individual fine voxels, including glass.
 Water and flowers do not collide; swimming is not simulated yet.
 Physics ticks at 20 TPS; rendering interpolates positions between ticks
 and mouse look remains immediate. Menus freeze physics. Blocks cannot be
-placed inside your body. World edges and the bottom are solid.
+placed inside your body. World edges and the bottom are solid outside spectator mode.
 This version has no car physics or AI.
 
 ERRORS

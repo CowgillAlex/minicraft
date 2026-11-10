@@ -23,7 +23,7 @@ impl World {
             .find_map(|(id, door)| door.local_cell(cell).map(|p| (id, p)))
     }
     fn overlay_set(&mut self, cell: [i32; 3], material: u8) {
-        let Some((chunk, index)) = Self::address(cell[0], cell[1], cell[2]) else {
+        let Some((chunk, index)) = self.address(cell[0], cell[1], cell[2]) else {
             return;
         };
         if material == AIR && self.door_chunks[chunk].is_none() {
@@ -62,7 +62,9 @@ impl World {
         cells
     }
     pub fn edit(&mut self, cell: [i32; 3], material: u8) -> Option<Edit> {
-        if !crate::editing::in_bounds(cell) || self.get(cell[0], cell[1], cell[2]) == material {
+        if !crate::editing::in_bounds(cell, self.height())
+            || self.get(cell[0], cell[1], cell[2]) == material
+        {
             return None;
         }
         if let Some((id, local)) = self
@@ -114,7 +116,7 @@ impl World {
         if next.blocked_by(player)
             || next.blocked_by(rendered_player)
             || next.occupied().any(|(p, _)| {
-                !crate::editing::in_bounds(p)
+                !crate::editing::in_bounds(p, self.height())
                     || self.get_static(p[0], p[1], p[2]) != AIR
                     || self.door_at(p).is_some_and(|(other, _)| other != id)
             })

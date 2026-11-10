@@ -1,5 +1,5 @@
 use crate::{
-    light_field::{LightField, LightPatch, SIZE},
+    light_field::{LightField, LightPatch},
     world::World,
 };
 use std::{sync::mpsc, thread};
@@ -26,9 +26,10 @@ impl LightVolume {
         let start = std::time::Instant::now();
         let mut field = LightField::build(world);
         println!("Light field baked in {:.2}s", start.elapsed().as_secs_f32());
+        let size = field.size();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("warm block light and skylight"),
-            size: extent(),
+            size: extent(size),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D3,
@@ -36,7 +37,7 @@ impl LightVolume {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        upload(queue, &texture, [0; 3], SIZE, &field.pixels);
+        upload(queue, &texture, [0; 3], size, &field.pixels);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("voxel light field layout"),
             entries: &[
@@ -154,11 +155,11 @@ impl Drop for LightVolume {
         }
     }
 }
-fn extent() -> wgpu::Extent3d {
+fn extent(size: [usize; 3]) -> wgpu::Extent3d {
     wgpu::Extent3d {
-        width: SIZE[0] as u32,
-        height: SIZE[1] as u32,
-        depth_or_array_layers: SIZE[2] as u32,
+        width: size[0] as u32,
+        height: size[1] as u32,
+        depth_or_array_layers: size[2] as u32,
     }
 }
 fn upload(

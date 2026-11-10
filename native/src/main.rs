@@ -5,6 +5,7 @@ mod bloom;
 mod camera;
 mod capture;
 mod capture_views;
+mod chunk;
 mod daylight;
 mod door_gpu;
 mod doors;
@@ -14,6 +15,7 @@ mod hud;
 mod light_field;
 mod light_volume;
 mod mesh;
+mod mesh_stream;
 mod occlusion;
 mod overlay;
 mod physics;
@@ -113,6 +115,7 @@ impl App {
             return;
         };
         renderer.ui.flying = self.simulation.player.mode == physics::Mode::Fly;
+        renderer.ui.spectating = self.simulation.player.mode == physics::Mode::Spectator;
         renderer.ui.grounded = self.simulation.player.grounded;
         renderer.ui.ticks = self.simulation.ticks;
         let frame = match surface.get_current_texture() {
@@ -306,6 +309,15 @@ impl ApplicationHandler for App {
                         }
                         KeyCode::KeyR => self.reset_player(),
                         KeyCode::KeyF if self.captured => self.simulation.toggle_flight(),
+                        KeyCode::F5 if self.captured => {
+                            if let Some(renderer) = &mut self.renderer {
+                                if !self.simulation.toggle_spectator(renderer.world()) {
+                                    renderer.show_notice(
+                                        "Move into clear space inside the world to leave spectator mode",
+                                    );
+                                }
+                            }
+                        }
                         KeyCode::KeyO => {
                             if let Some(renderer) = &mut self.renderer {
                                 renderer.ao_enabled = !renderer.ao_enabled;
@@ -381,6 +393,17 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
     }
     let scene = worldgen::preview::Scene::from_args(&args)?;
     if let worldgen::preview::Scene::Noise(preview) = scene {
+        if args.iter().any(|arg| arg == "--worldgen-benchmark") {
+            let start = Instant::now();
+            let world = preview.build_with_progress(&startup::Progress::default())?;
+            println!(
+                "World generation: {:.3}s, {} occupied voxels, {:.2} MiB voxel storage",
+                start.elapsed().as_secs_f64(),
+                world.voxels,
+                world.voxel_storage_bytes() as f64 / 1048576.0
+            );
+            return Ok(());
+        }
         if args.iter().any(|arg| arg == "--noise-benchmark") {
             return preview.benchmark().map_err(Into::into);
         }

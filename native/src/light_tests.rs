@@ -27,7 +27,7 @@ fn benchmark_lighting_edits() {
             let elapsed = start.elapsed();
             let bytes = patch.as_ref().map_or(0, |p| p.pixels.len());
             if let Some(patch) = patch {
-                apply_patch(&mut displayed, &patch);
+                apply_patch(&mut displayed, &patch, field.grid);
             }
             println!("Edit {cell:?} material {material}: {elapsed:?}, {bytes} upload bytes");
         }
@@ -101,11 +101,11 @@ fn snapshots_are_independent_and_thin_walls_are_not_skipped() {
     assert!(!world.emitters.contains(&[321, 40, 320]));
 }
 
-fn apply_patch(pixels: &mut [u8], patch: &LightPatch) {
+fn apply_patch(pixels: &mut [u8], patch: &LightPatch, grid: Grid) {
     let mut source = 0;
     for z in patch.origin[2]..patch.origin[2] + patch.size[2] {
         for y in patch.origin[1]..patch.origin[1] + patch.size[1] {
-            let start = index(patch.origin[0], y, z) * 2;
+            let start = grid.index(patch.origin[0], y, z) * 2;
             let length = patch.size[0] * 2;
             pixels[start..start + length].copy_from_slice(&patch.pixels[source..source + length]);
             source += length;
@@ -115,7 +115,7 @@ fn apply_patch(pixels: &mut [u8], patch: &LightPatch) {
 }
 fn check_update(world: &World, field: &mut LightField, displayed: &mut [u8], edits: &[[i32; 3]]) {
     if let Some(patch) = field.update(world, edits) {
-        apply_patch(displayed, &patch);
+        apply_patch(displayed, &patch, field.grid);
     }
     assert_eq!(
         displayed, field.pixels,
@@ -138,7 +138,7 @@ fn check_update(world: &World, field: &mut LightField, displayed: &mut [u8], edi
     {
         panic!(
             "incremental lighting differs at {:?} channel {}: {} vs {}",
-            position(i / 2),
+            field.grid.position(i / 2),
             i % 2,
             field.pixels[i],
             rebuilt.pixels[i]
@@ -269,4 +269,17 @@ fn door_motion_updates_light_through_the_opening_and_matches_full_bakes() {
     let (_, edits) = world.toggle_door(0, far, far);
     check_update(&world, &mut field, &mut displayed, &edits);
     assert_eq!(field.at([330, 34, 310]), closed);
+}
+
+#[test]
+fn lighting_and_incremental_uploads_follow_the_actual_world_height() {
+    let mut world = World::with_height(16 * 16);
+    world.set(320, 230, 320, world::LIGHT);
+    let mut field = LightField::build(&world);
+    assert_eq!(field.size(), [160, 64, 160]);
+    assert!(field.at([320, 234, 320])[0] > 0);
+    let mut displayed = field.pixels.clone();
+    world.set(320, 230, 320, world::AIR);
+    check_update(&world, &mut field, &mut displayed, &[[320, 230, 320]]);
+    assert_eq!(field.at([320, 234, 320])[0], 0);
 }

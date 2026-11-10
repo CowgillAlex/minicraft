@@ -97,3 +97,53 @@ fn a_buffered_tap_is_not_repeated_for_each_catchup_tick() {
     assert!((sim.player.position.y - 5.25).abs() < 0.00001);
     assert_eq!(sim.player.velocity.y, 0.0);
 }
+
+#[test]
+fn spectator_passes_through_solids_and_preserves_the_visible_pose() {
+    let mut world = World::empty();
+    for x in 320..340 {
+        for y in 70..110 {
+            for z in 300..340 {
+                world.set(x, y, z, crate::world::STONE);
+            }
+        }
+    }
+    let mut sim = flight();
+    sim.advance(&World::empty(), right(), 0.075);
+    let before = sim.render_position();
+    assert!(sim.toggle_spectator(&world));
+    assert!(sim.render_position().abs_diff_eq(before, 0.000001));
+    sim.advance(
+        &world,
+        Input {
+            direction: Vec3::X,
+            speed: 40.0,
+            ..Default::default()
+        },
+        0.1,
+    );
+    assert!(sim.player.position.x > 3.0);
+    assert_eq!(sim.player.mode, Mode::Spectator);
+    assert_eq!(sim.player.position.y, before.y);
+    assert!(sim.toggle_spectator(&world));
+    assert_eq!(sim.player.mode, Mode::Fly);
+}
+
+#[test]
+fn spectator_cannot_exit_inside_terrain_and_ignores_world_boundaries() {
+    let mut world = World::empty();
+    let mut sim = flight();
+    assert!(sim.toggle_spectator(&world));
+    let cell = crate::ray::grid_position(sim.render_position() + Vec3::Y)
+        .floor()
+        .as_ivec3()
+        .to_array();
+    world.set(cell[0], cell[1], cell[2], crate::world::STONE);
+    assert!(!sim.toggle_spectator(&world));
+    assert_eq!(sim.player.mode, Mode::Spectator);
+    sim.player.position = Vec3::new(25.0, -4.0, 25.0);
+    sim.previous = sim.player.position;
+    sim.advance(&world, right(), 0.1);
+    assert!(sim.player.position.x > 25.0);
+    assert_eq!(sim.player.position.y, -4.0);
+}

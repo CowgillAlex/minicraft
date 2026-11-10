@@ -1,4 +1,4 @@
-use crate::world::{self, World, AIR, CHUNK, DEPTH, HEIGHT, VOXEL, WIDTH};
+use crate::world::{self, World, AIR, CHUNK, DEPTH, VOXEL, WIDTH};
 use glam::{IVec3, Vec3};
 use std::collections::HashSet;
 
@@ -24,8 +24,8 @@ pub struct Hit {
     pub distance: f32,
 }
 pub use crate::ray::grid_position;
-pub fn in_bounds(cell: [i32; 3]) -> bool {
-    (0..WIDTH).contains(&cell[0]) && (0..HEIGHT).contains(&cell[1]) && (0..DEPTH).contains(&cell[2])
+pub fn in_bounds(cell: [i32; 3], height: i32) -> bool {
+    (0..WIDTH).contains(&cell[0]) && (0..height).contains(&cell[1]) && (0..DEPTH).contains(&cell[2])
 }
 
 /// Traverse voxel cells exactly, keeping the last empty cell for face-adjacent placement.
@@ -58,22 +58,24 @@ fn cast_cells(
     None
 }
 
-pub fn edit_cell(hit: Hit, camera: Vec3, place: bool) -> Option<[i32; 3]> {
+pub fn edit_cell(hit: Hit, camera: Vec3, place: bool, height: i32) -> Option<[i32; 3]> {
     let cell = if place { hit.adjacent? } else { hit.cell };
-    if !in_bounds(cell) || (place && grid_position(camera).floor().as_ivec3().to_array() == cell) {
+    if !in_bounds(cell, height)
+        || (place && grid_position(camera).floor().as_ivec3().to_array() == cell)
+    {
         return None;
     }
     Some(cell)
 }
 
 /// Faces and corner AO can depend on neighboring chunks, including diagonal ones.
-pub fn affected_chunks(cell: [i32; 3]) -> Vec<[i32; 3]> {
+pub fn affected_chunks(cell: [i32; 3], height: i32) -> Vec<[i32; 3]> {
     let mut chunks = HashSet::new();
     for x in -1..=1 {
         for y in -1..=1 {
             for z in -1..=1 {
                 let p = (IVec3::from_array(cell) + IVec3::new(x, y, z)).to_array();
-                if in_bounds(p) {
+                if in_bounds(p, height) {
                     chunks.insert(p.map(|v| v / CHUNK as i32));
                 }
             }
@@ -179,8 +181,11 @@ mod tests {
             adjacent: Some([4, 8, 8]),
             distance: 0.03,
         };
-        assert_eq!(edit_cell(hit, camera, true), None);
-        assert_eq!(edit_cell(hit, camera, false), Some([5, 8, 8]));
+        assert_eq!(edit_cell(hit, camera, true, world::HEIGHT), None);
+        assert_eq!(
+            edit_cell(hit, camera, false, world::HEIGHT),
+            Some([5, 8, 8])
+        );
         assert_eq!(
             edit_cell(
                 Hit {
@@ -188,18 +193,22 @@ mod tests {
                     ..hit
                 },
                 camera,
-                true
+                true,
+                world::HEIGHT
             ),
             None
         );
     }
     #[test]
     fn dirty_chunks_include_corner_ao_neighbors() {
-        assert_eq!(affected_chunks([16, 16, 16]), vec![[0, 0, 0]]);
-        let dirty = affected_chunks([32, 32, 32]);
+        assert_eq!(
+            affected_chunks([16, 16, 16], world::HEIGHT),
+            vec![[0, 0, 0]]
+        );
+        let dirty = affected_chunks([32, 32, 32], world::HEIGHT);
         assert_eq!(dirty.len(), 8);
         assert!(dirty.contains(&[0, 0, 0]));
         assert!(dirty.contains(&[1, 1, 1]));
-        assert_eq!(affected_chunks([0, 0, 0]), vec![[0, 0, 0]]);
+        assert_eq!(affected_chunks([0, 0, 0], world::HEIGHT), vec![[0, 0, 0]]);
     }
 }

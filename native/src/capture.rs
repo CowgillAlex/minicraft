@@ -78,6 +78,13 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         .map(crate::capture_views::shadow_view)
         .transpose()?
         .unwrap_or_default();
+    if shadow_view.is_none() {
+        if let Some(preview) = renderer.world().noise_preview {
+            if preview.height_m > 12 {
+                camera.position.y += (58 - preview.origin[1]) as f32;
+            }
+        }
+    }
     if closeup {
         let (x, z) = (155, 205);
         let base = crate::world::terrain_height(x, z) + 2;
@@ -194,6 +201,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         println!("GPU edit verification passed: break, place, chunk replacement, shadow refresh, target outline and incremental lamp uploads");
     }
     renderer.finish_doors();
+    renderer.finish_meshes(&camera)?;
     renderer.finish_lighting();
     let start = Instant::now();
     for _ in 0..frames {

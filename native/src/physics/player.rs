@@ -13,6 +13,7 @@ pub enum Mode {
     #[default]
     Walk,
     Fly,
+    Spectator,
 }
 #[derive(Clone, Copy, Default)]
 pub struct Input {
@@ -69,7 +70,22 @@ impl Player {
     }
     pub fn safe_spawn(world: &World) -> Self {
         let mut player = Self::spawn();
-        for _ in 0..=world::HEIGHT {
+        if world.noise_preview.is_some() {
+            let [x, _, z] = crate::ray::grid_position(player.position)
+                .floor()
+                .as_ivec3()
+                .to_array();
+            for y in (0..world.height()).rev() {
+                if !matches!(
+                    world.get(x, y, z),
+                    world::AIR | world::WATER | world::FLOWER
+                ) {
+                    player.position.y = (y + 1) as f32 * VOXEL + 0.00002;
+                    break;
+                }
+            }
+        }
+        for _ in 0..=world.height() {
             if Self::can_occupy(world, player.position) {
                 return player;
             }
@@ -92,7 +108,7 @@ impl Player {
     pub fn tick(&mut self, world: &World, input: Input) {
         let dt = TICK_SECONDS as f32;
         let boost = if input.sprint {
-            if self.mode == Mode::Fly {
+            if self.mode != Mode::Walk {
                 3.0
             } else {
                 1.5
@@ -102,7 +118,7 @@ impl Player {
         };
         let speed = input.speed.clamp(0.3, 40.0) * boost;
         let mut wanted_velocity = input.direction * speed;
-        if self.mode == Mode::Fly {
+        if self.mode != Mode::Walk {
             wanted_velocity.y =
                 (u8::from(input.jump) as f32 - u8::from(input.descend) as f32) * speed;
             wanted_velocity = wanted_velocity.clamp_length_max(speed);
@@ -122,6 +138,11 @@ impl Player {
             self.velocity.y = (self.velocity.y - GRAVITY * dt).max(-48.0);
         }
         let wanted = self.velocity * dt;
+        if self.mode == Mode::Spectator {
+            self.position += wanted;
+            self.grounded = false;
+            return;
+        }
         let motion = collision::move_body(
             world,
             self.bounds(),

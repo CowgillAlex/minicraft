@@ -2,7 +2,7 @@ use crate::{
     camera::Frustum,
     editing,
     mesh::{Batch, Mesh},
-    world::{World, CHUNK},
+    world::World,
 };
 use glam::Vec3;
 use std::collections::HashMap;
@@ -25,6 +25,7 @@ pub struct SceneMesh {
     batches: Vec<Batch>,
     transparent_batches: Vec<Batch>,
     replacements: HashMap<[i32; 3], Option<GpuChunk>>,
+    stream: Option<crate::mesh_stream::Stream>,
 }
 impl SceneMesh {
     #[cfg(test)]
@@ -37,6 +38,76 @@ impl SceneMesh {
         world: World,
         progress: &crate::startup::Progress,
     ) -> Result<Self, String> {
+        if world.height() > crate::world::HEIGHT {
+            let position = crate::physics::Player::safe_spawn(&world).position
+                + Vec3::Y * crate::physics::EYE_HEIGHT;
+            let keys = crate::mesh_stream::wanted(&world, position);
+            progress.begin(crate::startup::Stage::Mesh, keys.len());
+            let mut replacements = HashMap::new();
+            let mut bytes = 0;
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let workers = std::thread::available_parallelism()
+                .map_or(1, usize::from)
+                .saturating_sub(2)
+                .clamp(1, 4);
+            std::thread::scope(|scope| {
+                let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+                for _ in 0..workers {
+                    let sender = sender.clone();
+                    let next = &next;
+                    let keys = &keys;
+                    let world = &world;
+                    scope.spawn(move || loop {
+                        if progress.check().is_err() {
+                            break;
+                        }
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&key) = keys.get(index) else { break };
+                        if sender.send((key, Mesh::build_chunk(world, key))).is_err() {
+                            break;
+                        }
+                    });
+                }
+                drop(sender);
+                for (key, mesh) in &receiver {
+                    if progress.check().is_err() {
+                        break;
+                    }
+                    bytes += mesh.vertices.len() * std::mem::size_of::<crate::mesh::Vertex>()
+                        + (mesh.indices.len() + mesh.transparent_indices.len()) * 4;
+                    replacements.insert(key, gpu_chunk(device, key, &mesh));
+                    progress.advance();
+                }
+                drop(receiver);
+            });
+            progress.check()?;
+            println!(
+                "Nearby mesh cache: {} chunks, {:.1} MiB",
+                keys.len(),
+                bytes as f64 / 1048576.0
+            );
+            return Ok(Self {
+                world,
+                vertices: buffer(
+                    device,
+                    "unused shared vertices",
+                    &[],
+                    wgpu::BufferUsages::VERTEX,
+                ),
+                indices: buffer(
+                    device,
+                    "unused shared indices",
+                    &[],
+                    wgpu::BufferUsages::INDEX,
+                ),
+                transparent: None,
+                count: 0,
+                batches: Vec::new(),
+                transparent_batches: Vec::new(),
+                replacements,
+                stream: Some(crate::mesh_stream::Stream::new(position, keys)),
+            });
+        }
         let mut mesh = Mesh::build_with_progress(&world, progress)?;
         if world.noise_preview.is_none() {
             mesh.add_horizon();
@@ -66,6 +137,7 @@ impl SceneMesh {
             batches: mesh.batches,
             transparent_batches: mesh.transparent_batches,
             replacements: HashMap::new(),
+            stream: None,
         })
     }
     pub fn edit(
@@ -78,34 +150,66 @@ impl SceneMesh {
         let chunks: std::collections::HashSet<_> = edit
             .terrain
             .iter()
-            .flat_map(|&p| editing::affected_chunks(p))
+            .flat_map(|&p| editing::affected_chunks(p, self.world.height()))
             .collect();
         for chunk in chunks {
             let mesh = Mesh::build_chunk(&self.world, chunk);
-            let replacement = if mesh.indices.is_empty() && mesh.transparent_indices.is_empty() {
-                None
-            } else {
-                Some(GpuChunk {
-                    vertices: buffer(
-                        device,
-                        "edited vertices",
-                        bytemuck::cast_slice(&mesh.vertices),
-                        wgpu::BufferUsages::VERTEX,
-                    ),
-                    indices: optional_indices(device, &mesh.indices),
-                    transparent: optional_indices(device, &mesh.transparent_indices),
-                    count: mesh.indices.len() as u32,
-                    transparent_count: mesh.transparent_indices.len() as u32,
-                    center: World::meters(
-                        chunk[0] * CHUNK as i32 + 16,
-                        chunk[1] * CHUNK as i32 + 16,
-                        chunk[2] * CHUNK as i32 + 16,
-                    ),
-                })
-            };
+            let replacement = gpu_chunk(device, chunk, &mesh);
             self.replacements.insert(chunk, replacement);
         }
+        if let Some(stream) = &mut self.stream {
+            let position = World::meters(
+                stream.center[0] * 32 + 16,
+                stream.center[1] * 32 + 16,
+                stream.center[2] * 32 + 16,
+            );
+            stream.request(&self.world, position, |key| {
+                self.replacements.contains_key(key)
+            });
+        }
         Some(edit.light)
+    }
+    pub fn update_stream(&mut self, device: &wgpu::Device, position: Vec3) -> bool {
+        let Some(stream) = &mut self.stream else {
+            return false;
+        };
+        let mut changed = false;
+        if crate::mesh_stream::center(position) != stream.center {
+            stream.request(&self.world, position, |key| {
+                self.replacements.contains_key(key)
+            });
+            let before = self.replacements.len();
+            self.replacements
+                .retain(|key, _| stream.desired.contains(key));
+            changed = before != self.replacements.len();
+        }
+        stream.submit();
+        let start = std::time::Instant::now();
+        let mut bytes = 0;
+        while start.elapsed().as_micros() < 2000 && bytes < 8 * 1024 * 1024 {
+            let result = match stream.results.try_recv() {
+                Ok(result) => result,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("Mesh worker stopped"),
+            };
+            if !stream.accepts(&result) {
+                continue;
+            }
+            bytes += result.mesh.vertices.len() * std::mem::size_of::<crate::mesh::Vertex>()
+                + (result.mesh.indices.len() + result.mesh.transparent_indices.len()) * 4;
+            self.replacements
+                .insert(result.key, gpu_chunk(device, result.key, &result.mesh));
+            changed = true;
+        }
+        changed
+    }
+    pub fn meshes_pending(&self) -> bool {
+        self.stream.as_ref().is_some_and(|stream| {
+            stream
+                .desired
+                .iter()
+                .any(|key| !self.replacements.contains_key(key))
+        })
     }
     pub fn draw<'a>(
         &'a self,
@@ -131,7 +235,16 @@ impl SceneMesh {
             stats.0 += 1;
             stats.1 += batch.indices.len() / 3;
         }
-        for chunk in self.replacements.values().flatten() {
+        let chunks: Vec<_> = if let Some(stream) = &self.stream {
+            stream
+                .order
+                .iter()
+                .filter_map(|key| self.replacements.get(key).and_then(Option::as_ref))
+                .collect()
+        } else {
+            self.replacements.values().flatten().collect()
+        };
+        for chunk in chunks {
             if frustum.is_some_and(|f| !f.contains_sphere(chunk.center, 3.0_f32.sqrt())) {
                 continue;
             }
@@ -214,4 +327,23 @@ fn optional_indices(device: &wgpu::Device, indices: &[u32]) -> Option<wgpu::Buff
             wgpu::BufferUsages::INDEX,
         ))
     }
+}
+
+fn gpu_chunk(device: &wgpu::Device, key: [i32; 3], mesh: &Mesh) -> Option<GpuChunk> {
+    if mesh.indices.is_empty() && mesh.transparent_indices.is_empty() {
+        return None;
+    }
+    Some(GpuChunk {
+        vertices: buffer(
+            device,
+            "chunk vertices",
+            bytemuck::cast_slice(&mesh.vertices),
+            wgpu::BufferUsages::VERTEX,
+        ),
+        indices: optional_indices(device, &mesh.indices),
+        transparent: optional_indices(device, &mesh.transparent_indices),
+        count: mesh.indices.len() as u32,
+        transparent_count: mesh.transparent_indices.len() as u32,
+        center: World::meters(key[0] * 32 + 16, key[1] * 32 + 16, key[2] * 32 + 16),
+    })
 }

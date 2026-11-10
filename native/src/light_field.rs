@@ -8,12 +8,6 @@ use glam::Vec3;
 mod updates;
 
 pub const STEP: i32 = 4;
-pub const SIZE: [usize; 3] = [
-    (world::WIDTH / STEP) as usize,
-    (world::HEIGHT / STEP) as usize,
-    (world::DEPTH / STEP) as usize,
-];
-const STRIDES: [usize; 3] = [1, SIZE[0], SIZE[0] * SIZE[1]];
 const BLOCKED: u8 = 255;
 const BLOCK_FALLOFF: u8 = 8;
 const SKY_FALLOFF: u8 = 14;
@@ -21,6 +15,7 @@ type Buckets = [Vec<usize>; 256];
 
 /// Connectivity and source values stay resident in the worker between edits.
 pub struct LightField {
+    grid: Grid,
     pub pixels: Vec<u8>,
     edges: Vec<[u8; 6]>,
     seeds: Vec<[u8; 2]>,
@@ -31,11 +26,40 @@ pub struct LightPatch {
     pub size: [usize; 3],
     pub pixels: Vec<u8>,
 }
-fn index(x: usize, y: usize, z: usize) -> usize {
-    x + SIZE[0] * (y + SIZE[1] * z)
+#[derive(Clone, Copy)]
+struct Grid {
+    size: [usize; 3],
+    strides: [usize; 3],
 }
-fn position(i: usize) -> [usize; 3] {
-    [i % SIZE[0], i / SIZE[0] % SIZE[1], i / STRIDES[2]]
+impl Grid {
+    fn new(height: i32) -> Self {
+        let size = [
+            (world::WIDTH / STEP) as usize,
+            (height / STEP) as usize,
+            (world::DEPTH / STEP) as usize,
+        ];
+        Self {
+            size,
+            strides: [1, size[0], size[0] * size[1]],
+        }
+    }
+    fn index(self, x: usize, y: usize, z: usize) -> usize {
+        x + self.size[0] * (y + self.size[1] * z)
+    }
+    fn position(self, i: usize) -> [usize; 3] {
+        [
+            i % self.size[0],
+            i / self.size[0] % self.size[1],
+            i / self.strides[2],
+        ]
+    }
+    fn neighbor(self, i: usize, direction: usize) -> usize {
+        if direction.is_multiple_of(2) {
+            i - self.strides[direction / 2]
+        } else {
+            i + self.strides[direction / 2]
+        }
+    }
 }
 fn center(x: usize, y: usize, z: usize) -> Vec3 {
     World::meters(
@@ -78,10 +102,11 @@ fn edge_loss(world: &World, p: [usize; 3], axis: usize) -> u8 {
     }
     total
 }
-fn sky_column(world: &World, x: usize, z: usize) -> [u8; SIZE[1]] {
-    let mut seeds = [0; SIZE[1]];
+fn sky_column(world: &World, x: usize, z: usize) -> Vec<u8> {
+    let grid = Grid::new(world.height());
+    let mut seeds = vec![0; grid.size[1]];
     let mut value = 255_u8;
-    for y in (0..world::HEIGHT).rev() {
+    for y in (0..world.height()).rev() {
         let material = world.get(x as i32 * STEP + STEP / 2, y, z as i32 * STEP + STEP / 2);
         if loss(material) == BLOCKED || material == world::LIGHT {
             break;
@@ -94,6 +119,7 @@ fn sky_column(world: &World, x: usize, z: usize) -> [u8; SIZE[1]] {
     seeds
 }
 fn emitter_seeds(world: &World, cell: [i32; 3], mut visit: impl FnMut(usize, u8)) {
+    let grid = Grid::new(world.height());
     let [x, y, z] = cell;
     let source = World::meters(x, y, z) + Vec3::splat(VOXEL * 0.5);
     let base = cell.map(|v| v / STEP);
@@ -103,7 +129,7 @@ fn emitter_seeds(world: &World, cell: [i32; 3], mut visit: impl FnMut(usize, u8)
                 let p = [base[0] + dx, base[1] + dy, base[2] + dz];
                 if p.iter()
                     .enumerate()
-                    .any(|(axis, v)| *v < 0 || *v >= SIZE[axis] as i32)
+                    .any(|(axis, v)| *v < 0 || *v >= grid.size[axis] as i32)
                 {
                     continue;
                 }
@@ -117,35 +143,39 @@ fn emitter_seeds(world: &World, cell: [i32; 3], mut visit: impl FnMut(usize, u8)
                 let value = 255_u8
                     .saturating_sub((distance * BLOCK_FALLOFF as f32) as u8)
                     .saturating_sub(cost);
-                visit(index(p[0], p[1], p[2]), value);
+                visit(grid.index(p[0], p[1], p[2]), value);
             }
         }
     }
 }
 impl LightField {
+    pub fn size(&self) -> [usize; 3] {
+        self.grid.size
+    }
     pub fn build(world: &World) -> Self {
-        let count = SIZE.iter().product::<usize>();
+        let grid = Grid::new(world.height());
+        let count = grid.size.iter().product::<usize>();
         let mut edges = vec![[BLOCKED; 6]; count];
-        for z in 0..SIZE[2] {
-            for y in 0..SIZE[1] {
-                for x in 0..SIZE[0] {
+        for z in 0..grid.size[2] {
+            for y in 0..grid.size[1] {
+                for x in 0..grid.size[0] {
                     let p = [x, y, z];
-                    let i = index(x, y, z);
+                    let i = grid.index(x, y, z);
                     for axis in 0..3 {
-                        if p[axis] + 1 < SIZE[axis] {
+                        if p[axis] + 1 < grid.size[axis] {
                             let cost = edge_loss(world, p, axis);
                             edges[i][axis * 2 + 1] = cost;
-                            edges[i + STRIDES[axis]][axis * 2] = cost;
+                            edges[i + grid.strides[axis]][axis * 2] = cost;
                         }
                     }
                 }
             }
         }
         let mut seeds = vec![[0; 2]; count];
-        for z in 0..SIZE[2] {
-            for x in 0..SIZE[0] {
+        for z in 0..grid.size[2] {
+            for x in 0..grid.size[0] {
                 for (y, value) in sky_column(world, x, z).into_iter().enumerate() {
-                    seeds[index(x, y, z)][1] = value;
+                    seeds[grid.index(x, y, z)][1] = value;
                 }
             }
         }
@@ -154,6 +184,7 @@ impl LightField {
         }
         let pixels = seeds.iter().flatten().copied().collect();
         let mut field = Self {
+            grid,
             pixels,
             edges,
             seeds,
@@ -176,6 +207,7 @@ impl LightField {
         buckets: &mut Buckets,
         mut changed: impl FnMut(usize),
     ) {
+        let grid = self.grid;
         // Brightest-first buckets visit a node only after its strongest path is known.
         for brightness in (1..256).rev() {
             while let Some(i) = buckets[brightness].pop() {
@@ -188,7 +220,7 @@ impl LightField {
                         continue;
                     }
                     let candidate = (brightness as u8).saturating_sub(decay.saturating_add(cost));
-                    let next = neighbor(i, direction);
+                    let next = grid.neighbor(i, direction);
                     let value = &mut self.pixels[next * 2 + channel];
                     if candidate > *value {
                         *value = candidate;
@@ -203,16 +235,10 @@ impl LightField {
     }
     #[cfg(test)]
     pub fn at(&self, cell: [i32; 3]) -> [u8; 2] {
+        let grid = self.grid;
         let p = cell.map(|v| (v / STEP) as usize);
-        let i = index(p[0], p[1], p[2]) * 2;
+        let i = grid.index(p[0], p[1], p[2]) * 2;
         [self.pixels[i], self.pixels[i + 1]]
-    }
-}
-fn neighbor(i: usize, direction: usize) -> usize {
-    if direction.is_multiple_of(2) {
-        i - STRIDES[direction / 2]
-    } else {
-        i + STRIDES[direction / 2]
     }
 }
 #[cfg(test)]

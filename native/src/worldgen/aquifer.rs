@@ -3,12 +3,12 @@ use crate::world::{AIR, STONE, WATER};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Fluid {
+pub(super) struct Fluid {
     level: i32,
     material: u8,
 }
 impl Fluid {
-    fn at(self, y: f64) -> u8 {
+    pub(super) fn at(self, y: f64) -> u8 {
         if y < f64::from(self.level) {
             self.material
         } else {
@@ -36,6 +36,49 @@ pub struct Aquifer {
 }
 
 impl Aquifer {
+    /// Equal candidate statuses guarantee zero pressure, regardless of nearest-cell changes.
+    pub(super) fn uniform_status(
+        &mut self,
+        sampler: &mut Sampler<'_>,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Option<Fluid> {
+        let lava = f64::from((-54).min(sampler.density.sea_level));
+        if max[1] < lava {
+            return Some(Fluid {
+                level: -54,
+                material: AIR,
+            });
+        }
+        if min[1] < lava {
+            return None;
+        }
+        let anchor = |p: [f64; 3]| {
+            [
+                ((p[0] - 5.0) / 16.0).floor() as i32,
+                ((p[1] + 1.0) / 12.0).floor() as i32,
+                ((p[2] - 5.0) / 16.0).floor() as i32,
+            ]
+        };
+        let a = anchor(min);
+        let b = anchor(max);
+        let mut shared = None;
+        for x in a[0]..=b[0] {
+            for y in a[1]..=b[1] {
+                for z in a[2]..=b[2] {
+                    self.prepare_neighbors([x, y, z]);
+                    for index in 0..12 {
+                        let status = self.status(sampler, index);
+                        if shared.is_some_and(|previous| previous != status) {
+                            return None;
+                        }
+                        shared = Some(status);
+                    }
+                }
+            }
+        }
+        shared
+    }
     pub fn new(seed: i64) -> Self {
         Self {
             random: Random::new(seed).named("minecraft:aquifer"),

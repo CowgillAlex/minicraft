@@ -46,6 +46,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("Mouse", "Look around"),
                 ("Space / Shift", "Jump / slow walk"),
                 ("F / Space / Shift", "Toggle flight / up / down"),
+                ("F5", "Toggle spectator / phase through"),
                 ("Ctrl / Scroll", "Boost / adjust speed"),
                 ("Left / Right click", "Break / place a voxel"),
                 ("Middle click", "Pick material"),

@@ -2,6 +2,14 @@ use super::noise::{lerp, Blended, Normal};
 use std::collections::HashMap;
 
 pub type Id = usize;
+#[path = "density_range.rs"]
+mod range;
+
+#[derive(Clone, Copy)]
+struct Cell {
+    key: [i32; 3],
+    values: [f64; 8],
+}
 
 pub enum Node {
     Constant(f64),
@@ -84,23 +92,34 @@ pub struct Density {
 
 pub struct Sampler<'a> {
     pub density: &'a Density,
+    last: Vec<Option<Cell>>,
     cells: HashMap<(Id, [i32; 3]), [f64; 8]>,
+    corners: HashMap<(Id, [i32; 3]), f64>,
 }
 
 impl<'a> Sampler<'a> {
     pub fn new(density: &'a Density) -> Self {
         Self {
             density,
+            last: vec![None; density.nodes.len()],
             cells: HashMap::new(),
+            corners: HashMap::new(),
         }
-    }
-
-    pub fn clear(&mut self) {
-        self.cells.clear();
     }
 
     pub fn root(&mut self, root: usize, point: [f64; 3]) -> f64 {
         self.eval(self.density.roots[root], point)
+    }
+    pub(super) fn interpolation_cell(
+        &mut self,
+        id: Id,
+        point: [f64; 3],
+    ) -> Option<([i32; 3], [f64; 8])> {
+        if !matches!(self.density.nodes[id], Node::Interpolated(_)) {
+            return None;
+        }
+        self.eval(id, point);
+        self.last[id].map(|cell| (cell.key, cell.values))
     }
 
     pub fn eval(&mut self, id: Id, p: [f64; 3]) -> f64 {
@@ -265,18 +284,34 @@ impl<'a> Sampler<'a> {
         let sizes = [4.0, 8.0, 4.0];
         let cell: [i32; 3] = std::array::from_fn(|i| (p[i] / sizes[i]).floor() as i32);
         let key = (id, cell);
-        let values = if let Some(values) = self.cells.get(&key) {
-            *values
+        let values = if let Some(cached) = self.last[id].filter(|v| v.key == cell) {
+            cached.values
         } else {
-            let values = std::array::from_fn(|i| {
-                self.eval(
-                    argument,
-                    std::array::from_fn(|axis| {
-                        f64::from(cell[axis] + ((i >> axis) & 1) as i32) * sizes[axis]
-                    }),
-                )
-            });
-            self.cells.insert(key, values);
+            let values = if let Some(values) = self.cells.get(&key) {
+                *values
+            } else {
+                let values = std::array::from_fn(|i| {
+                    let corner = std::array::from_fn(|axis| cell[axis] + ((i >> axis) & 1) as i32);
+                    if let Some(value) = self.corners.get(&(argument, corner)) {
+                        return *value;
+                    }
+                    let value = self.eval(
+                        argument,
+                        std::array::from_fn(|axis| f64::from(corner[axis]) * sizes[axis]),
+                    );
+                    if self.corners.len() >= 8192 {
+                        self.corners.clear();
+                    }
+                    self.corners.insert((argument, corner), value);
+                    value
+                });
+                if self.cells.len() >= 2048 {
+                    self.cells.clear();
+                }
+                self.cells.insert(key, values);
+                values
+            };
+            self.last[id] = Some(Cell { key: cell, values });
             values
         };
         let t: [f64; 3] =

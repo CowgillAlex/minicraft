@@ -27,7 +27,7 @@ impl Camera {
         )
     }
     pub fn matrix(&self, aspect: f32) -> Mat4 {
-        Mat4::perspective_rh(65_f32.to_radians(), aspect, 0.03, 180.0)
+        Mat4::perspective_rh(65_f32.to_radians(), aspect, 0.03, 512.0)
             * Mat4::look_to_rh(self.position, self.direction(), Vec3::Y)
     }
     pub fn look(&mut self, dx: f64, dy: f64) {

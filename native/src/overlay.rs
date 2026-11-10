@@ -20,6 +20,7 @@ pub struct OverlayStats<'a> {
     pub target: Option<Hit>,
     pub time: &'a str,
     pub lighting_pending: bool,
+    pub meshes_pending: bool,
 }
 pub fn vertices(
     camera: &Camera,
@@ -75,7 +76,13 @@ pub fn vertices(
     if layout.width >= 1100.0 {
         let speed = format!(
             "{}   {:.1} m/s",
-            if ui.flying { "Fly" } else { "Walk" },
+            if ui.spectating {
+                "Spectator"
+            } else if ui.flying {
+                "Fly"
+            } else {
+                "Walk"
+            },
             camera.speed
         );
         let speed_x = layout.width - 24.0 - Hud::text_width(&speed, 13.0, false);
@@ -90,6 +97,15 @@ pub fn vertices(
     }
     if stats.lighting_pending {
         hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
+    }
+    if stats.meshes_pending {
+        hud.text(
+            "Loading terrain",
+            layout.width - 124.0,
+            if stats.lighting_pending { 84.0 } else { 66.0 },
+            12.0,
+            MUTED,
+        );
     }
     if captured {
         if let Some(hint) = stats.interaction {
@@ -238,6 +254,8 @@ fn debug(
             ui.ticks,
             if ui.grounded {
                 "grounded"
+            } else if ui.spectating {
+                "spectating"
             } else if ui.flying {
                 "flying"
             } else {

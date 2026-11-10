@@ -25,7 +25,7 @@ fn obstacles(world: &World, body: Aabb, movement: Vec3, stepping: bool) -> Vec<A
         .floor()
         .as_ivec3();
     let mut boxes = Vec::new();
-    for y in min.y.max(0)..=max.y.min(world::HEIGHT - 1) {
+    for y in min.y.max(0)..=max.y.min(world.height() - 1) {
         for z in min.z.max(0)..=max.z.min(world::DEPTH - 1) {
             for x in min.x.max(0)..=max.x.min(world::WIDTH - 1) {
                 if solid(world.get(x, y, z)) {

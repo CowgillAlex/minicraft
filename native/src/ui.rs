@@ -14,6 +14,7 @@ pub struct UiState {
     pub debug: bool,
     pub played: bool,
     pub flying: bool,
+    pub spectating: bool,
     pub grounded: bool,
     pub ticks: u64,
 }

@@ -11,6 +11,7 @@ pub struct Simulation {
     accumulator: f64,
     jump_pending: bool,
     pub ticks: u64,
+    before_spectator: Mode,
 }
 impl Default for Simulation {
     fn default() -> Self {
@@ -25,6 +26,7 @@ impl Simulation {
             accumulator: 0.0,
             jump_pending: false,
             ticks: 0,
+            before_spectator: Mode::Walk,
         }
     }
     pub fn queue_jump(&mut self) {
@@ -58,11 +60,17 @@ impl Simulation {
         self.render_position() + Vec3::Y * EYE_HEIGHT
     }
     pub fn blocks_placement(&self, cell: [i32; 3]) -> bool {
+        if self.player.mode == Mode::Spectator {
+            return false;
+        }
         let block = Aabb::voxel(cell);
         block.intersects(self.player.bounds())
             || block.intersects(Player::bounds_at(self.render_position()))
     }
     pub fn toggle_flight(&mut self) {
+        if self.player.mode == Mode::Spectator {
+            return;
+        }
         self.player.mode = if self.player.mode == Mode::Walk {
             Mode::Fly
         } else {
@@ -70,6 +78,26 @@ impl Simulation {
         };
         self.player.velocity = Vec3::ZERO;
         self.jump_pending = false;
+    }
+    /// Preserve the visible pose; leaving spectator requires clear space for the body.
+    pub fn toggle_spectator(&mut self, world: &World) -> bool {
+        let position = self.render_position();
+        if self.player.mode == Mode::Spectator {
+            if !Player::can_occupy(world, position) {
+                return false;
+            }
+            self.player.mode = self.before_spectator;
+        } else {
+            self.before_spectator = self.player.mode;
+            self.player.mode = Mode::Spectator;
+        }
+        self.player.position = position;
+        self.previous = position;
+        self.accumulator = 0.0;
+        self.player.velocity = Vec3::ZERO;
+        self.player.grounded = false;
+        self.jump_pending = false;
+        true
     }
     pub fn reset(&mut self, world: &World) {
         *self = Self::new(Player::safe_spawn(world));

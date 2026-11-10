@@ -36,7 +36,9 @@ pub fn opaque(material: u8) -> bool {
 
 #[derive(Clone)]
 pub struct World {
-    chunks: Vec<Option<Arc<[u8]>>>,
+    chunks: Vec<Option<crate::chunk::Chunk>>,
+    height: i32,
+    pub max_occupied_y: i32,
     door_chunks: Vec<Option<Arc<[u8]>>>,
     pub doors: Vec<crate::doors::Door>,
     loose_handles: HashSet<[i32; 3]>,
@@ -46,9 +48,16 @@ pub struct World {
 }
 impl World {
     pub fn empty() -> Self {
+        Self::with_height(HEIGHT)
+    }
+    pub fn with_height(height: i32) -> Self {
+        assert!(height > 0 && height % CHUNK as i32 == 0);
+        let count = NX * NZ * (height as usize / CHUNK);
         Self {
-            chunks: vec![None; NX * NY * NZ],
-            door_chunks: vec![None; NX * NY * NZ],
+            chunks: vec![None; count],
+            height,
+            max_occupied_y: 0,
+            door_chunks: vec![None; count],
             doors: Vec::new(),
             loose_handles: HashSet::new(),
             voxels: 0,
@@ -56,15 +65,34 @@ impl World {
             noise_preview: None,
         }
     }
-    pub(crate) fn insert_chunk(&mut self, chunk: [usize; 3], data: Vec<u8>) {
-        let count = data.iter().filter(|v| **v != AIR).count();
+    pub fn height(&self) -> i32 {
+        self.height
+    }
+    pub fn chunks_y(&self) -> usize {
+        self.height as usize / CHUNK
+    }
+    pub fn voxel_storage_bytes(&self) -> usize {
+        self.chunks
+            .iter()
+            .flatten()
+            .map(|chunk| match chunk {
+                crate::chunk::Chunk::Uniform(_) => 1,
+                crate::chunk::Chunk::Dense(cells) => cells.len(),
+            })
+            .sum()
+    }
+    pub(crate) fn insert_chunk(&mut self, chunk: [usize; 3], data: crate::chunk::Chunk) {
+        let count = data.occupied();
         if count > 0 {
             self.voxels += count;
-            self.chunks[chunk[0] + NX * chunk[2] + NX * NZ * chunk[1]] = Some(Arc::from(data));
+            self.max_occupied_y = self
+                .max_occupied_y
+                .max((chunk[1] as i32 + 1) * CHUNK as i32);
+            self.chunks[chunk[0] + NX * chunk[2] + NX * NZ * chunk[1]] = Some(data);
         }
     }
-    fn address(x: i32, y: i32, z: i32) -> Option<(usize, usize)> {
-        if !(0..WIDTH).contains(&x) || !(0..HEIGHT).contains(&y) || !(0..DEPTH).contains(&z) {
+    fn address(&self, x: i32, y: i32, z: i32) -> Option<(usize, usize)> {
+        if !(0..WIDTH).contains(&x) || !(0..self.height).contains(&y) || !(0..DEPTH).contains(&z) {
             return None;
         }
         let (x, y, z) = (x as usize, y as usize, z as usize);
@@ -74,10 +102,12 @@ impl World {
         ))
     }
     pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
-        let Some((chunk, index)) = Self::address(x, y, z) else {
+        let Some((chunk, index)) = self.address(x, y, z) else {
             return AIR;
         };
-        let material = self.chunks[chunk].as_ref().map_or(AIR, |data| data[index]);
+        let material = self.chunks[chunk]
+            .as_ref()
+            .map_or(AIR, |data| data.get(index));
         if material != AIR {
             return material;
         }
@@ -86,21 +116,23 @@ impl World {
             .map_or(AIR, |data| data[index])
     }
     pub fn get_static(&self, x: i32, y: i32, z: i32) -> u8 {
-        Self::address(x, y, z)
-            .and_then(|(chunk, index)| self.chunks[chunk].as_ref().map(|data| data[index]))
+        self.address(x, y, z)
+            .and_then(|(chunk, index)| self.chunks[chunk].as_ref().map(|data| data.get(index)))
             .unwrap_or(AIR)
     }
     pub fn set(&mut self, x: i32, y: i32, z: i32, material: u8) {
-        if let Some((chunk, index)) = Self::address(x, y, z) {
+        if let Some((chunk, index)) = self.address(x, y, z) {
             if material == AIR && self.chunks[chunk].is_none() {
                 return;
             }
-            let data = self.chunks[chunk].get_or_insert_with(|| Arc::from(vec![0; CHUNK.pow(3)]));
-            let data = Arc::make_mut(data);
-            let previous = data[index];
+            let data = self.chunks[chunk].get_or_insert(crate::chunk::Chunk::Uniform(AIR));
+            let previous = data.get(index);
             self.voxels += usize::from(previous == AIR && material != AIR);
             self.voxels -= usize::from(previous != AIR && material == AIR);
-            data[index] = material;
+            data.set(index, material);
+            if material != AIR {
+                self.max_occupied_y = self.max_occupied_y.max(y + 1);
+            }
             if previous == LIGHT && material != LIGHT {
                 self.emitters.remove(&[x, y, z]);
             }
@@ -117,6 +149,31 @@ impl World {
     }
     pub fn chunk_exists(&self, x: usize, y: usize, z: usize) -> bool {
         self.chunks[x + NX * z + NX * NZ * y].is_some()
+    }
+    pub fn buried_chunk(&self, chunk: [i32; 3]) -> bool {
+        let full = |p: [i32; 3]| {
+            if p[0] < 0
+                || p[1] < 0
+                || p[2] < 0
+                || p[0] >= NX as i32
+                || p[1] >= self.chunks_y() as i32
+                || p[2] >= NZ as i32
+            {
+                return false;
+            }
+            matches!(self.chunks[p[0] as usize+NX*p[2] as usize+NX*NZ*p[1] as usize],Some(crate::chunk::Chunk::Uniform(material)) if opaque(material))
+        };
+        full(chunk)
+            && [
+                [1, 0, 0],
+                [-1, 0, 0],
+                [0, 1, 0],
+                [0, -1, 0],
+                [0, 0, 1],
+                [0, 0, -1],
+            ]
+            .into_iter()
+            .all(|d| full(std::array::from_fn(|i| chunk[i] + d[i])))
     }
     pub fn meters(x: i32, y: i32, z: i32) -> Vec3 {
         Vec3::new((x - WIDTH / 2) as f32, y as f32, (z - DEPTH / 2) as f32) * VOXEL

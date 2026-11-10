@@ -15,7 +15,7 @@ struct Uniforms {
 @group(2) @binding(1) var light_sampler: sampler;
 fn lighting_at(world: vec3<f32>,normal: vec3<f32>) -> vec2<f32> {
     let position = world + normal * 0.14;
-    let uv = (position + vec3(20.0,0.0,20.0) - vec3(0.03125))/vec3(40.0,12.0,40.0);
+    let uv = (position + vec3(20.0,0.0,20.0) - vec3(0.03125))/(vec3<f32>(textureDimensions(light_volume))*0.25);
     if any(uv<vec3(0.0)) || any(uv>vec3(1.0)) { return vec2(0.0,1.0); }
     return textureSampleLevel(light_volume,light_sampler,uv,0.0).rg;
 }
@@ -92,12 +92,23 @@ fn shadow_visibility(world: vec3<f32>, normal: vec3<f32>) -> f32 {
     return textureSampleCompareLevel(shadow_map,shadow_sampler,uv,ndc.z-bias);
 
 }
+// Full-height worlds keep only nearby fine meshes resident. Fog covers the cache edge.
+fn streamed_world() -> bool { return textureDimensions(light_volume).y > 48u; }
+fn terrain_fog(distance:f32) -> f32 {
+    let normal=min(1.0-exp(-distance*distance*0.00012),0.92);
+    if streamed_world() { return max(normal,smoothstep(20.0,24.0,distance)); }
+    return normal;
+}
+fn fog_sky(direction:vec3<f32>) -> vec3<f32> {
+    if streamed_world() { return sky_color(direction); }
+    return sky_color(vec3(direction.x,0.015,direction.z));
+}
 struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32> };
 @fragment fn fs_world(v: VertexOut) -> SurfaceOut {
     let normal = normalize(v.normal);
     let direction = normalize(v.world - scene.camera.xyz);
     let sunlight = max(dot(normal, scene.sun.xyz), 0.0);
-    let visibility = shadow_visibility(v.world, normal);
+    var visibility = shadow_visibility(v.world, normal);
     if scene.options.w > 0.5 {
         var out: SurfaceOut;
         out.color=vec4(vec3(visibility),1.0);
@@ -110,6 +121,7 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     base *= 0.94 + noise * 0.12;
     let voxel_ao = mix(mix(v.ao.x,v.ao.y,v.uv.x),mix(v.ao.w,v.ao.z,v.uv.x),v.uv.y);
     let field=lighting_at(v.world,normal);
+    if streamed_world() && field.y<0.001 {visibility=0.0;}
     let sky_tint=mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x);
     let sky_light=sky_tint*pow(field.y,1.35)*(0.7+0.3*max(normal.y,0.0));
     let block_light=vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
@@ -127,11 +139,11 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
         color *= 0.65 + 0.35 * smoothstep(0.0, aa * 0.8, plane_edge);
     }
     let distance = length(v.world - scene.camera.xyz);
-    let fog = 1.0 - exp(-distance * distance * 0.00012);
-    color = mix(color, sky_color(vec3(direction.x, 0.015, direction.z)), min(fog, 0.92));
+    let fog = terrain_fog(distance);
+    color = mix(color, fog_sky(direction), fog);
     var out: SurfaceOut;
     out.color = vec4(color,1.0);
-    out.normal = vec4(normal*0.5+0.5,ambient_fraction*(1.0-min(fog,0.92)));
+    out.normal = vec4(normal*0.5+0.5,ambient_fraction*(1.0-fog));
     return out;
 }
 struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<f32> };
@@ -168,7 +180,7 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     let color=reflection*0.75+vec3(0.025,0.055,0.065)+vec3(1.0,0.78,0.55)*pow(field.x,2.0)*0.12;
     let border=min(min(v.uv.x,1.0-v.uv.x),min(v.uv.y,1.0-v.uv.y));
     let edge=1.0-smoothstep(0.0,max(fwidth(border)*1.5,0.002),border);
-    let alpha=0.10+fresnel*0.48+edge*0.12;
+    let alpha=(0.10+fresnel*0.48+edge*0.12)*select(1.0,1.0-terrain_fog(length(v.world-scene.camera.xyz)),streamed_world());
     return vec4(tonemap(color),alpha);
 }
 
@@ -197,7 +209,8 @@ fn shade_water(v: VertexOut, front: bool) -> vec4<f32> {
     let transmission = exp(-thickness*0.26)*(1.0-reflected);
     let alpha = clamp(1.0-transmission,0.08,0.98);
     let field = lighting_at(v.world,normal);
-    let visibility = shadow_visibility(v.world,normalize(v.normal));
+    var visibility = shadow_visibility(v.world,normalize(v.normal));
+    if streamed_world() && field.y<0.001 {visibility=0.0;}
     let sky = mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x)*pow(field.y,1.35);
     let lamp = vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;
     let sunlight = scene.light_color.rgb*scene.sun.w*max(dot(normal,scene.sun.xyz),0.0)*visibility;
@@ -206,7 +219,7 @@ fn shade_water(v: VertexOut, front: bool) -> vec4<f32> {
     let specular = pow(max(dot(reflect(-scene.sun.xyz,wave),-view),0.0),96.0);
     var color = tint*(1.0-reflected/max(alpha,0.0001)) + reflection*reflected/max(alpha,0.0001);
     color += scene.light_color.rgb*scene.sun.w*specular*visibility*0.45;
-    let fog = min(1.0-exp(-distance*distance*0.00012),0.92);
-    color = mix(color,sky_color(vec3(view.x,0.015,view.z)),fog);
+    let fog = terrain_fog(distance);
+    color = mix(color,fog_sky(view),fog);
     return vec4(tonemap(max(color,vec3(0.0))),alpha);
 }

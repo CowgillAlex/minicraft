@@ -49,11 +49,13 @@ impl Mesh {
             batches: Vec::new(),
             transparent_batches: Vec::new(),
         };
-        for cy in 0..world::NY {
+        for cy in 0..world.chunks_y() {
             for cz in 0..world::NZ {
                 for cx in 0..world::NX {
                     progress.check()?;
-                    if !world.chunk_exists(cx, cy, cz) {
+                    if !world.chunk_exists(cx, cy, cz)
+                        || world.buried_chunk([cx as i32, cy as i32, cz as i32])
+                    {
                         progress.advance();
                         continue;
                     }
@@ -106,7 +108,9 @@ impl Mesh {
             batches: Vec::new(),
             transparent_batches: Vec::new(),
         };
-        if world.chunk_exists(chunk[0] as usize, chunk[1] as usize, chunk[2] as usize) {
+        if world.chunk_exists(chunk[0] as usize, chunk[1] as usize, chunk[2] as usize)
+            && !world.buried_chunk(chunk)
+        {
             mesh.chunk(world, chunk.map(|v| v * CHUNK as i32));
         }
         mesh
