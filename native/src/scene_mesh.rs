@@ -41,7 +41,8 @@ impl SceneMesh {
         if world.height() > crate::world::HEIGHT {
             let position = crate::physics::Player::safe_spawn(&world).position
                 + Vec3::Y * crate::physics::EYE_HEIGHT;
-            let keys = crate::mesh_stream::wanted(&world, position);
+            let radius = crate::view_settings::ViewSettings::default().cache_radius();
+            let keys = crate::mesh_stream::wanted(&world, position, radius);
             progress.begin(crate::startup::Stage::Mesh, keys.len());
             let mut replacements = HashMap::new();
             let mut bytes = 0;
@@ -106,7 +107,7 @@ impl SceneMesh {
                 batches: Vec::new(),
                 transparent_batches: Vec::new(),
                 replacements,
-                stream: Some(crate::mesh_stream::Stream::new(position, keys)),
+                stream: Some(crate::mesh_stream::Stream::new(position, keys, radius)),
             });
         }
         let mut mesh = Mesh::build_with_progress(&world, progress)?;
@@ -164,19 +165,19 @@ impl SceneMesh {
                 stream.center[1] * 32 + 16,
                 stream.center[2] * 32 + 16,
             );
-            stream.request(&self.world, position, |key| {
+            stream.request(&self.world, position, stream.radius, |key| {
                 self.replacements.contains_key(key)
             });
         }
         Some(edit.light)
     }
-    pub fn update_stream(&mut self, device: &wgpu::Device, position: Vec3) -> bool {
+    pub fn update_stream(&mut self, device: &wgpu::Device, position: Vec3, radius: f32) -> bool {
         let Some(stream) = &mut self.stream else {
             return false;
         };
         let mut changed = false;
-        if crate::mesh_stream::center(position) != stream.center {
-            stream.request(&self.world, position, |key| {
+        if crate::mesh_stream::center(position) != stream.center || radius != stream.radius {
+            stream.request(&self.world, position, radius, |key| {
                 self.replacements.contains_key(key)
             });
             let before = self.replacements.len();

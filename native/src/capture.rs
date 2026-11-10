@@ -14,6 +14,8 @@ pub struct CaptureOptions<'a> {
     pub ao_enabled: bool,
     pub night_vision: bool,
     pub transparency: bool,
+    pub distance: Option<u16>,
+    pub fog: bool,
     pub view: Option<&'a str>,
     pub hours: Option<f32>,
 }
@@ -30,6 +32,8 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         ao_enabled,
         night_vision,
         transparency,
+        distance,
+        fog,
         view: shadow_view,
         hours,
     } = options;
@@ -50,11 +54,19 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
             renderer.ui.panel = crate::ui::Panel::Controls;
             false
         }
+        "view-settings" => {
+            renderer.ui.panel = crate::ui::Panel::View;
+            false
+        }
         "settings" => {
             renderer.ui.panel = crate::ui::Panel::Settings;
             false
         }
-        _ => return Err("--ui expects play, pause, controls, settings, or debug".into()),
+        _ => {
+            return Err(
+                "--ui expects play, pause, controls, settings, view-settings, or debug".into(),
+            )
+        }
     };
     let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("offscreen capture"),
@@ -71,6 +83,10 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         view_formats: &[],
     });
     let view = texture.create_view(&Default::default());
+    if let Some(distance) = distance {
+        renderer.view.set_distance(distance)?;
+    }
+    renderer.view.fog = fog;
     renderer.ao_enabled = ao_enabled;
     renderer.night_vision = night_vision;
     renderer.transparency_enabled = transparency;

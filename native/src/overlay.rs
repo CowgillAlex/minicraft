@@ -14,6 +14,7 @@ pub struct OverlayStats<'a> {
     pub chunks: usize,
     pub ao_enabled: bool,
     pub night_vision: bool,
+    pub view: crate::view_settings::ViewSettings,
     pub grid: bool,
     pub local_time: bool,
     pub interaction: Option<&'a str>,

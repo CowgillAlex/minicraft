@@ -32,6 +32,8 @@ mod title;
 mod ui;
 mod ui_icons;
 mod ui_menu;
+mod ui_view;
+mod view_settings;
 mod water;
 mod world;
 mod worldgen;
@@ -512,6 +514,17 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
                 ao_enabled: !args.iter().any(|arg| arg == "--no-ao"),
                 night_vision: args.iter().any(|arg| arg == "--night-vision"),
                 transparency: !args.iter().any(|arg| arg == "--no-transparency"),
+                distance: args
+                    .iter()
+                    .position(|arg| arg == "--render-distance")
+                    .map(|i| {
+                        args.get(i + 1)
+                            .ok_or("--render-distance needs metres")?
+                            .parse::<u16>()
+                            .map_err(Box::<dyn Error>::from)
+                    })
+                    .transpose()?,
+                fog: !args.iter().any(|arg| arg == "--no-fog"),
                 view: args
                     .iter()
                     .position(|arg| arg == "--shadow-view" || arg == "--view")

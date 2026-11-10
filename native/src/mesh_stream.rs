@@ -12,7 +12,6 @@ use std::{
     },
 };
 
-pub const RADIUS: f32 = 28.0;
 pub type Key = [i32; 3];
 struct Job {
     epoch: u64,
@@ -32,6 +31,7 @@ pub struct Stream {
     pub results: mpsc::Receiver<ResultMesh>,
     queued: Option<Job>,
     pub center: Key,
+    pub radius: f32,
     pub order: Vec<Key>,
     pub desired: HashSet<Key>,
 }
@@ -43,16 +43,16 @@ pub fn center(position: Vec3) -> Key {
         .to_array()
         .map(|v| v.div_euclid(CHUNK as i32))
 }
-pub fn wanted(world: &World, position: Vec3) -> Vec<Key> {
+pub fn wanted(world: &World, position: Vec3, radius: f32) -> Vec<Key> {
     let c = center(position);
-    let r = (RADIUS / 2.0).ceil() as i32 + 1;
+    let r = (radius / 2.0).ceil() as i32 + 1;
     let mut keys = Vec::new();
     for y in (c[1] - r).max(0)..=(c[1] + r).min(world.chunks_y() as i32 - 1) {
         for z in (c[2] - r).max(0)..=(c[2] + r).min(NZ as i32 - 1) {
             for x in (c[0] - r).max(0)..=(c[0] + r).min(NX as i32 - 1) {
                 let key = [x, y, z];
                 let midpoint = World::meters(x * 32 + 16, y * 32 + 16, z * 32 + 16);
-                if midpoint.distance(position) > RADIUS + 3.0_f32.sqrt()
+                if midpoint.distance(position) > radius + 3.0_f32.sqrt()
                     || !world.chunk_exists(x as usize, y as usize, z as usize)
                     || world.buried_chunk(key)
                 {
@@ -72,7 +72,7 @@ pub fn wanted(world: &World, position: Vec3) -> Vec<Key> {
 }
 
 impl Stream {
-    pub fn new(position: Vec3, order: Vec<Key>) -> Self {
+    pub fn new(position: Vec3, order: Vec<Key>, radius: f32) -> Self {
         let epoch = Arc::new(AtomicU64::new(1));
         let token = epoch.clone();
         let (jobs, requests) = mpsc::sync_channel::<Job>(1);
@@ -107,13 +107,21 @@ impl Stream {
             results,
             queued: None,
             center: center(position),
+            radius,
             order,
             desired,
         }
     }
-    pub fn request(&mut self, world: &World, position: Vec3, loaded: impl Fn(&Key) -> bool) {
+    pub fn request(
+        &mut self,
+        world: &World,
+        position: Vec3,
+        radius: f32,
+        loaded: impl Fn(&Key) -> bool,
+    ) {
         let epoch = self.epoch.fetch_add(1, Ordering::Relaxed) + 1;
-        self.order = wanted(world, position);
+        self.order = wanted(world, position, radius);
+        self.radius = radius;
         self.desired = self.order.iter().copied().collect();
         let keys = self
             .order
@@ -156,7 +164,7 @@ mod tests {
         let mut world = World::with_height(384 * 16);
         world.set(320, 2000, 320, crate::world::STONE);
         world.set(320, 4000, 320, crate::world::STONE);
-        let high = wanted(&world, World::meters(320, 4000, 320));
+        let high = wanted(&world, World::meters(320, 4000, 320), 28.0);
         assert!(high.contains(&[10, 125, 10]));
         assert!(!high.contains(&[10, 62, 10]));
     }
@@ -165,15 +173,15 @@ mod tests {
         let mut world = World::with_height(384 * 16);
         world.set(320, 4000, 320, crate::world::STONE);
         let position = World::meters(320, 4000, 320);
-        let mut stream = Stream::new(position, Vec::new());
-        stream.request(&world, position, |_| false);
+        let mut stream = Stream::new(position, Vec::new(), 28.0);
+        stream.request(&world, position, 28.0, |_| false);
         let old = stream
             .results
             .recv_timeout(std::time::Duration::from_secs(3))
             .unwrap();
         assert!(stream.accepts(&old));
         world.set(320, 4000, 320, crate::world::GLASS);
-        stream.request(&world, position, |_| false);
+        stream.request(&world, position, 28.0, |_| false);
         assert!(!stream.accepts(&old));
         let new = stream
             .results
@@ -182,5 +190,28 @@ mod tests {
         assert!(stream.accepts(&new));
         assert!(new.mesh.indices.is_empty());
         assert!(!new.mesh.transparent_indices.is_empty());
+    }
+    #[test]
+    fn changing_radius_at_a_fixed_position_loads_far_chunks_and_rejects_shrunk_results() {
+        let mut world = World::with_height(384 * 16);
+        world.set(320, 1600, 320, crate::world::STONE);
+        world.set(320, 2080, 320, crate::world::STONE);
+        let position = World::meters(320, 1600, 320);
+        let near = [10, 50, 10];
+        let far = [10, 65, 10];
+        assert!(!wanted(&world, position, 28.0).contains(&far));
+        let mut stream = Stream::new(position, vec![near], 28.0);
+        stream.request(&world, position, 68.0, |key| *key == near);
+        let result = stream
+            .results
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap();
+        assert_eq!(result.key, far);
+        assert!(stream.accepts(&result));
+        stream.request(&world, position, 28.0, |key| *key == near);
+        assert_eq!(stream.center, center(position));
+        assert!(stream.desired.contains(&near));
+        assert!(!stream.desired.contains(&far));
+        assert!(!stream.accepts(&result));
     }
 }

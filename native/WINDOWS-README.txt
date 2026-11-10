@@ -1,7 +1,7 @@
-MINICRAFT v0.9.0
+MINICRAFT v0.10.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.9.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.10.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -20,6 +20,12 @@ outlines, and time of day. Use local time follows the computer clock in
 its local timezone, including while menus are open. This option is off
 by default and lasts for the current session. Turning it off keeps the
 current time. The -/+ time buttons and -/= keys switch back to manual.
+Settings > Distance & fog adjusts render distance from 12 to 256 metres.
+Fog has an on/off toggle, a start distance and strength from 25% to 200%.
+Fog start scales with render distance. The default is 24 metres of terrain,
+fog starting at 20 metres, and 100% strength. Restore defaults resets these
+controls. Changes apply immediately; extra meshes load in the background.
+Longer distances use more GPU memory and draw more geometry.
 F1 shows controls and F3 shows debug info. Night vision is in Settings or
 on F6. It reveals dark caves without changing the clock or rebaking light.
 Title screen in the world menu lets you choose another seed. Creating a new
@@ -103,7 +109,9 @@ only stone, water and air. It ports the Paper-Minecraft PR #1 density graph
 and aquifer rules. Terrain is sampled every 6.25 cm at its original scale.
 The title screen chooses the seed. The default origin is 120,-64,-20. The full -64 to 320 metre range is loaded.
 Uniform 2 metre pages use one material value; mixed pages retain fine voxels.
-Nearby meshes stream within 28 metres. Fog hides the cache boundary.
+Nearby meshes stream within render distance plus a 4 metre loading margin.
+Render distance and fog can be controlled separately in Settings. The world
+remains a finite 40 x 384 x 40 metre column.
 Packed 28-byte GPU vertices reduce mesh bandwidth and memory. Fully fogged
 chunks are culled. Streaming shadow refreshes are limited to eight per second;
 voxel edits, doors and time changes still refresh shadows immediately.

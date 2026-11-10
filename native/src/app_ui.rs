@@ -69,7 +69,11 @@ impl App {
                 if let Some(renderer) = &mut self.renderer {
                     match action {
                         Action::Controls => renderer.ui.panel = Panel::Controls,
-                        Action::Settings => renderer.ui.panel = Panel::Settings,
+                        Action::Settings | Action::BackToSettings => {
+                            renderer.ui.panel = Panel::Settings
+                        }
+                        Action::View => renderer.ui.panel = Panel::View,
+                        Action::ViewChange(change) => renderer.view.change(change),
                         Action::Back => renderer.ui.panel = Panel::Pause,
                         Action::AmbientOcclusion => renderer.ao_enabled = !renderer.ao_enabled,
                         Action::Grid => renderer.grid = !renderer.grid,
@@ -97,7 +101,11 @@ impl App {
                     .is_some_and(|r| r.ui.panel != ui::Panel::Pause)
                 {
                     if let Some(renderer) = &mut self.renderer {
-                        renderer.ui.panel = ui::Panel::Pause;
+                        renderer.ui.panel = if renderer.ui.panel == ui::Panel::View {
+                            ui::Panel::Settings
+                        } else {
+                            ui::Panel::Pause
+                        };
                     }
                 } else {
                     self.capture_cursor(true);

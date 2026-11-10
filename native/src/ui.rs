@@ -6,6 +6,7 @@ pub enum Panel {
     Pause,
     Controls,
     Settings,
+    View,
 }
 #[derive(Default)]
 pub struct UiState {
@@ -30,6 +31,9 @@ pub enum Action {
     Vsync,
     Grid,
     LocalTime,
+    View,
+    ViewChange(crate::view_settings::Change),
+    BackToSettings,
     Earlier,
     Later,
 }
@@ -72,7 +76,8 @@ impl Layout {
         let (w, h) = match panel {
             Panel::Pause => (360.0, 348.0),
             Panel::Controls => (520.0, 516.0),
-            Panel::Settings => (440.0, 496.0),
+            Panel::Settings => (440.0, 550.0),
+            Panel::View => (480.0, 534.0),
         };
         Rect {
             x: (self.width - w) / 2.0,
@@ -104,14 +109,16 @@ impl Layout {
                 add(216.0, "Controls", Action::Controls, false);
                 add(270.0, "Title screen", Action::Title, false);
             }
+            Panel::View => return crate::ui_view::buttons(self),
             Panel::Controls => add(448.0, "Back", Action::Back, false),
             Panel::Settings => {
-                add(80.0, "Ambient occlusion", Action::AmbientOcclusion, false);
-                add(134.0, "VSync", Action::Vsync, false);
-                add(188.0, "Voxel outlines", Action::Grid, false);
-                add(242.0, "Night vision", Action::NightVision, false);
-                add(296.0, "Use local time", Action::LocalTime, false);
-                add(428.0, "Back", Action::Back, false);
+                add(80.0, "Distance & fog", Action::View, false);
+                add(134.0, "Ambient occlusion", Action::AmbientOcclusion, false);
+                add(188.0, "VSync", Action::Vsync, false);
+                add(242.0, "Voxel outlines", Action::Grid, false);
+                add(296.0, "Night vision", Action::NightVision, false);
+                add(350.0, "Use local time", Action::LocalTime, false);
+                add(482.0, "Back", Action::Back, false);
                 for (offset, label, action) in [
                     (0.0, "-", Action::Earlier),
                     (p.w - 92.0, "+", Action::Later),
@@ -119,7 +126,7 @@ impl Layout {
                     buttons.push(Button {
                         rect: Rect {
                             x: p.x + 24.0 + offset,
-                            y: p.y + 366.0,
+                            y: p.y + 420.0,
                             w: 44.0,
                             h: 40.0,
                         },
@@ -171,28 +178,51 @@ mod tests {
         }
         let layout = Layout::new((1440, 900));
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 304.0]),
+            layout.action_at(Panel::Settings, [720.0, 331.0]),
             Some(Action::AmbientOcclusion)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 358.0]),
+            layout.action_at(Panel::Settings, [720.0, 385.0]),
             Some(Action::Vsync)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [546.0, 588.0]),
+            layout.action_at(Panel::Settings, [546.0, 615.0]),
             Some(Action::Earlier)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [894.0, 588.0]),
+            layout.action_at(Panel::Settings, [894.0, 615.0]),
             Some(Action::Later)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 520.0]),
+            layout.action_at(Panel::Settings, [720.0, 547.0]),
             Some(Action::LocalTime)
         );
         assert_eq!(
             layout.action_at(Panel::Controls, [720.0, 662.0]),
             Some(Action::Back)
         );
+        for size in [(800, 600), (1440, 900), (3840, 2160)] {
+            let layout = Layout::new(size);
+            for panel in [Panel::Settings, Panel::View] {
+                let bounds = layout.panel(panel);
+                for button in layout.buttons(panel) {
+                    assert!(button.rect.y + button.rect.h <= layout.height);
+                    assert!(
+                        button.rect.x >= bounds.x
+                            && button.rect.x + button.rect.w <= bounds.x + bounds.w
+                    );
+                    assert_eq!(
+                        layout.action_at(
+                            panel,
+                            [
+                                (button.rect.x + button.rect.w / 2.0) * layout.scale,
+                                (button.rect.y + button.rect.h / 2.0) * layout.scale
+                            ]
+                        ),
+                        Some(button.action)
+                    );
+                }
+            }
+        }
     }
 }

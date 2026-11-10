@@ -64,6 +64,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 hud.text(description, p.x + 224.0, y, 14.0, TEXT);
             }
         }
+        Panel::View => crate::ui_view::draw(hud, layout, stats.view),
         Panel::Settings => {
             hud.text(
                 if stats.local_time {
@@ -72,7 +73,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                     "Sun and moon follow your computer's clock."
                 },
                 p.x + 26.0,
-                p.y + 348.0,
+                p.y + 402.0,
                 12.0,
                 MUTED,
             );
@@ -80,7 +81,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             hud.centered(
                 &format!("Time of day   {}", stats.time),
                 p.x + p.w / 2.0,
-                p.y + 378.0,
+                p.y + 432.0,
                 14.0,
                 TEXT,
                 false,
@@ -115,6 +116,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             Action::Grid => Some(stats.grid),
             Action::NightVision => Some(stats.night_vision),
             Action::LocalTime => Some(stats.local_time),
+            Action::ViewChange(crate::view_settings::Change::Fog) => Some(stats.view.fog),
             _ => None,
         };
         if let Some(enabled) = toggle {

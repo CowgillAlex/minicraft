@@ -27,6 +27,7 @@ struct Uniforms {
     options: [f32; 4],
     daylight: [f32; 4],
     light_color: [f32; 4],
+    view: [f32; 4],
 }
 pub struct FrameInfo {
     pub size: (u32, u32),
@@ -45,6 +46,7 @@ pub struct Renderer {
     water: crate::water::WaterDepth,
     pub ao_enabled: bool,
     pub night_vision: bool,
+    pub view: crate::view_settings::ViewSettings,
     pub transparency_enabled: bool,
     shadow_debug: bool,
     uniform: wgpu::Buffer,
@@ -234,6 +236,7 @@ impl Renderer {
             water,
             ao_enabled: true,
             night_vision: false,
+            view: Default::default(),
             transparency_enabled: true,
             shadow_debug: false,
             uniform,
@@ -308,7 +311,10 @@ impl Renderer {
     pub fn finish_meshes(&mut self, camera: &Camera) -> Result<()> {
         let start = Instant::now();
         loop {
-            if self.scene.update_stream(&self.device, camera.position) {
+            if self
+                .scene
+                .update_stream(&self.device, camera.position, self.view.cache_radius())
+            {
                 self.shadow_ready = false;
             }
             if !self.scene.meshes_pending() {
@@ -330,7 +336,10 @@ impl Renderer {
             self.shadow_ready = false;
         }
         self.lighting.poll(&self.queue);
-        if self.scene.update_stream(&self.device, camera.position) {
+        if self
+            .scene
+            .update_stream(&self.device, camera.position, self.view.cache_radius())
+        {
             self.stream_shadows_dirty = true;
         }
         // Mesh arrivals are spread across frames; avoid rebuilding the 4096² map for each batch.
@@ -370,6 +379,7 @@ impl Renderer {
                 camera: camera.position.extend(1.0).to_array(),
                 sun: sun.extend(power).to_array(),
                 daylight,
+                view: self.view.uniforms(),
                 light_color: color
                     .extend(f32::from(u8::from(self.night_vision)))
                     .to_array(),
@@ -381,10 +391,7 @@ impl Renderer {
                 ],
             }),
         );
-        let mut frustum = Frustum::new(matrix);
-        if self.scene.world.height() > crate::world::HEIGHT {
-            frustum = frustum.within_distance(camera.position, 24.0);
-        }
+        let frustum = Frustum::new(matrix).within_distance(camera.position, self.view.distance());
         self.target = if captured {
             picking::cast(&self.scene.world, &self.door_meshes, camera)
         } else {
@@ -590,6 +597,7 @@ impl Renderer {
                 chunks: self.visible_chunks,
                 ao_enabled: self.ao_enabled,
                 night_vision: self.night_vision,
+                view: self.view,
                 grid: self.grid,
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
@@ -620,3 +628,7 @@ mod door_interaction;
 
 #[path = "door_validation.rs"]
 mod door_validation;
+
+#[cfg(test)]
+#[path = "view_tests.rs"]
+mod view_tests;

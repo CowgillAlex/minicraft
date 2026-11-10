@@ -7,6 +7,7 @@ struct Uniforms {
     options: vec4<f32>,
     daylight: vec4<f32>,
     light_color: vec4<f32>,
+    view: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;
@@ -94,9 +95,10 @@ fn shadow_visibility(world: vec3<f32>, normal: vec3<f32>) -> f32 {
 // Full-height worlds keep only nearby fine meshes resident. Fog covers the cache edge.
 fn streamed_world() -> bool { return textureDimensions(light_volume).y > 48u; }
 fn terrain_fog(distance:f32) -> f32 {
-    let normal=min(1.0-exp(-distance*distance*0.00012),0.92);
-    if streamed_world() { return max(normal,smoothstep(20.0,24.0,distance)); }
-    return normal;
+    if scene.view.w<0.5 { return 0.0; }
+    let haze=min(1.0-exp(-distance*distance*0.00012*scene.view.z),0.92);
+    let edge=smoothstep(scene.view.y,scene.view.x,distance)*scene.view.z;
+    return clamp(max(haze,edge),0.0,1.0);
 }
 fn fog_sky(direction:vec3<f32>) -> vec3<f32> {
     if streamed_world() { return sky_color(direction); }
@@ -179,7 +181,7 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     let color=reflection*0.75+vec3(0.025,0.055,0.065)+vec3(1.0,0.78,0.55)*pow(field.x,2.0)*0.12;
     let border=min(min(v.uv.x,1.0-v.uv.x),min(v.uv.y,1.0-v.uv.y));
     let edge=1.0-smoothstep(0.0,max(fwidth(border)*1.5,0.002),border);
-    let alpha=(0.10+fresnel*0.48+edge*0.12)*select(1.0,1.0-terrain_fog(length(v.world-scene.camera.xyz)),streamed_world());
+    let alpha=(0.10+fresnel*0.48+edge*0.12)*(1.0-terrain_fog(length(v.world-scene.camera.xyz)));
     return vec4(tonemap(color),alpha);
 }
 
