@@ -157,6 +157,47 @@ fn uniform_page_skipping_matches_every_reference_voxel() {
 }
 
 #[test]
+fn reported_aquifer_pages_match_reference_and_have_no_exposed_water_sides() {
+    let seed = 1794358123416304200;
+    let generator = Generator::new(seed).unwrap();
+    let mut optimized = generator.sampler();
+    let mut reference = generator.sampler();
+    let preview = preview::Preview {
+        seed,
+        origin: [0; 3],
+        ..Default::default()
+    };
+    for origin in [[4288, 352, -2304], [5024, 992, 384], [5024, 992, 416]] {
+        let actual = super::page::generate_raw(preview, &mut optimized, origin);
+        let expected = super::page::reference(preview, &mut reference, origin);
+        for (index, material) in expected.into_iter().enumerate() {
+            assert_eq!(
+                actual.data.get(index),
+                material,
+                "{origin:?}, voxel {index}"
+            );
+            if material != WATER {
+                continue;
+            }
+            let cell = [
+                origin[0] + (index % 32) as i32,
+                origin[1] + (index / 1024) as i32,
+                origin[2] + ((index / 32) % 32) as i32,
+            ];
+            // The upper water surface is free. Sides and undersides need a seal.
+            for delta in [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 0, -1], [0, 0, 1]] {
+                let neighbor = std::array::from_fn(|i| cell[i] + delta[i]);
+                assert_ne!(
+                    reference.material(preview.point(neighbor)),
+                    AIR,
+                    "exposed water at {cell:?} toward {delta:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn preview_height_defaults_to_the_full_reference_range_and_old_origins_remain_valid() {
     let parse = |args: &[&str]| {
         preview::Scene::from_args(&args.iter().map(|v| v.to_string()).collect::<Vec<_>>())

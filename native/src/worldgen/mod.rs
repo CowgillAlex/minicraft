@@ -7,6 +7,7 @@ mod density;
 mod fast_density;
 mod noise;
 pub(crate) mod page;
+mod preliminary;
 pub mod preview;
 mod random;
 pub(crate) mod sky;

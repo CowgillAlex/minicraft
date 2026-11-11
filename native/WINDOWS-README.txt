@@ -1,7 +1,7 @@
-MINICRAFT v0.14.0
+MINICRAFT v0.14.1
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.14.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.14.1-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -162,7 +162,10 @@ Optional launch arguments:
 
 Aquifers now use 3D seeded cells, full X/Z surface checks and 3D pressure
 barriers. Fluid regions vary along both horizontal axes instead of extruding
-the old 2D layout. Terrain density and its original metre scale are unchanged.
+the old 2D layout. Preliminary heights now retain the original one-metre
+positive-density scan at exact columns. Fine-voxel pressure centres and thin
+wet/dry seals fix leaking boundaries; corrected heights remove spurious
+sea-level water volumes. Terrain density and its metre scale are unchanged.
 Water is translucent: shallow water reveals the bottom and deeper water
 adds blue tint. Animated reflections and day/night shadows remain active.
 Surface rules add grass/dirt, gravel seabeds, sand/sandstone, red sand,

@@ -1,4 +1,4 @@
-"""Restore XYZ coordinates in the Java oracle without using Rust's candidate cache."""
+"""Extend the Java oracle to XYZ and MiniCraft's documented fine-voxel seals."""
 
 def adapt(java):
     java = java.replace("Map<Integer, Integer> preliminarySurfaceCache", "Map<String, Integer> preliminarySurfaceCache")
@@ -31,12 +31,11 @@ def adapt(java):
     start = java.index("    private int preliminarySurfaceLevel(")
     end = java.index("    private FluidStatus globalFluid", start)
     java = java[:start] + '''    private int preliminarySurfaceLevel(int x,int z) {
-        int qx=Math.floorDiv(x,4)*4,qz=Math.floorDiv(z,4)*4;
-        String key=qx+"/"+qz;
+        String key=x+"/"+z;
         if(preliminarySurfaceCache.containsKey(key)) return preliminarySurfaceCache.get(key);
         int result=worldgen.getMinY();
-        for(int y=worldgen.getWorldTopYExclusive();y>=worldgen.getMinY();y-=8) {
-            if(noiseStep.sampleInitialDensityWithoutJaggedness(qx,y,qz)>0.390625) { result=y; break; }
+        for(int y=worldgen.getWorldTopYExclusive()-1;y>=worldgen.getMinY();y--) {
+            if(noiseStep.sampleInitialDensityWithoutJaggedness(x,y,z)>0.0) { result=y; break; }
         }
         preliminarySurfaceCache.put(key,result); return result;
     }
@@ -44,5 +43,15 @@ def adapt(java):
 ''' + java[end:]
     java = java.replace("calculatePressure(double blockX, double blockY,", "calculatePressure(double blockX, double blockY, double blockZ,")
     java = java.replace("sampleBarrier(blockX, blockY, 0)", "sampleBarrier(blockX, blockY, blockZ)")
+    java = java.replace("blockY + 0.5 - averageFluidY", "blockY + 1.0/32.0 - averageFluidY")
+    for index in [2, 3]:
+        statement = f"FluidStatus closestStatus{index} = getStatus(nearest[{index-1}].key());"
+        java = java.replace(statement, statement + f'''
+        if (closestStatus1.at(blockY).getBlock() != closestStatus{index}.at(blockY).getBlock()) {{
+            Location a=nearest[0].location(), b=nearest[{index-1}].location();
+            double dx=a.x()-b.x(), dy=a.y()-b.y(), dz=a.z()-b.z();
+            double gap=distances[{index-1}]-distances[0];
+            if (gap*gap <= (dx*dx+dy*dy+dz*dz)/256.0) return null;
+        }}''')
     java = java.replace("    private static final int X_SPACING", "    private static final int[][] SURFACE_SAMPLES={{-2,-1},{-1,-1},{0,-1},{1,-1},{-3,0},{-2,0},{-1,0},{0,0},{1,0},{-2,1},{-1,1},{0,1},{1,1}};\n    private static final int X_SPACING")
     return java

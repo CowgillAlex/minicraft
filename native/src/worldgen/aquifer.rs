@@ -1,5 +1,5 @@
 use super::{density::Sampler, random::Random};
-use crate::world::{AIR, STONE, WATER};
+use crate::world::{AIR, STONE, VOXEL, WATER};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -131,13 +131,26 @@ impl Aquifer {
             return fluid;
         }
         let b = self.status(sampler, nearest[1]);
-        if density + similarity12 * pressure(sampler, [x, y, z], a, b) > 0.0 {
+        if (fluid != b.at(y)
+            && boundary_seal(
+                self.neighbors[nearest[0]],
+                self.neighbors[nearest[1]],
+                distances[1] - distances[0],
+            ))
+            || density + similarity12 * pressure(sampler, [x, y, z], a, b) > 0.0
+        {
             return STONE;
         }
         let c = self.status(sampler, nearest[2]);
         let similarity13 = similarity(distances[0], distances[2]);
-        if similarity13 > 0.0
-            && density + similarity12 * similarity13 * pressure(sampler, [x, y, z], a, c) > 0.0
+        if (fluid != c.at(y)
+            && boundary_seal(
+                self.neighbors[nearest[0]],
+                self.neighbors[nearest[2]],
+                distances[2] - distances[0],
+            ))
+            || (similarity13 > 0.0
+                && density + similarity12 * similarity13 * pressure(sampler, [x, y, z], a, c) > 0.0)
         {
             return STONE;
         }
@@ -270,25 +283,24 @@ impl Aquifer {
     }
 
     fn surface(&mut self, sampler: &mut Sampler<'_>, x: i32, z: i32) -> i32 {
-        // Preliminary terrain height is evaluated on the reference 4 m horizontal / 8 m vertical lattice.
-        let key = [x.div_euclid(4) * 4, z.div_euclid(4) * 4];
+        let key = [x, z];
         if let Some(y) = self.surfaces.get(&key) {
             return *y;
         }
-        let min = sampler.density.min_y;
-        let top = min + sampler.density.height;
-        let mut surface = min;
-        let mut y = top;
-        while y >= min {
-            if sampler.root(1, [f64::from(key[0]), f64::from(y), f64::from(key[1])]) > 0.390625 {
-                surface = y;
-                break;
-            }
-            y -= 8;
-        }
+        let surface = super::preliminary::surface(sampler, x, z);
         self.surfaces.insert(key, surface);
         surface
     }
+}
+
+/// The squared-distance gap divided by twice the site separation is distance
+/// to their bisector. Keep a half-voxel on either side solid, even when noise
+/// cancels pressure. Squaring avoids a square root in the fine sampling path.
+fn boundary_seal(a: Candidate, b: Candidate, gap: f64) -> bool {
+    let separation: f64 = (0..3)
+        .map(|i| (f64::from(a.location[i]) - f64::from(b.location[i])).powi(2))
+        .sum();
+    gap * gap <= f64::from(VOXEL).powi(2) * separation
 }
 
 fn global_fluid(y: i32, sea: i32) -> Fluid {
@@ -316,7 +328,7 @@ fn pressure(sampler: &mut Sampler<'_>, [x, y, z]: [f64; 3], a: Fluid, b: Fluid) 
         return 0.0;
     }
     let average = 0.5 * f64::from(a.level + b.level);
-    let distance = y + 0.5 - average;
+    let distance = y + f64::from(VOXEL) * 0.5 - average;
     let edge = f64::from(difference) / 2.0 - distance.abs();
     let gradient = if distance > 0.0 {
         if edge > 0.0 {

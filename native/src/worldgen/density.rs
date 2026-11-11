@@ -64,12 +64,14 @@ pub struct SplinePoint {
     pub value: Id,
 }
 
+#[derive(Clone, Copy)]
 pub enum Binary {
     Add,
     Mul,
     Min,
     Max,
 }
+#[derive(Clone, Copy)]
 pub enum Unary {
     Abs,
     Square,

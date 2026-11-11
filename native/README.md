@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.14.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.14.1 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -40,7 +40,7 @@ After loading, the normal world menu appears. Physics remains paused until Play,
 
 The default scene ports the terrain density and extends the aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates stone, water and air before applying the surface rules. Biome-driven surfaces follow the raw density/aquifer pass. Ores, structures and vegetation are not generated yet. Existing editing materials and renderer effects remain available.
 
-One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. Aquifers now use full 3D cells with seed names that include X/Y/Z. The nearest fluid regions, floodedness, level spread, preliminary surface columns and pressure barriers all use Z. The original unimplemented lava band remains air.
+One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. Aquifers now use full 3D cells with seed names that include X/Y/Z. The nearest fluid regions, floodedness, level spread, preliminary surface columns and pressure barriers all use Z. Preliminary aquifer heights use the original exact columns and one-metre positive-density scan. Horizontal density terms are evaluated once per column, and conservative bounds skip empty height ranges without changing the result. Pressure uses the fine voxel centre, with a one-voxel stone seal at wet/dry cell boundaries that negative barrier noise cannot puncture. The original unimplemented lava band remains air.
 
 The generator uses the reference vertical range of -64 to 320 metres. The default source origin is `120,-64,-20`. The title screen chooses its seed; headless diagnostics use seed 1 unless overridden. The player spawns above an exact source terrain scan. Signed horizontal page coordinates extend the same voxel field beyond the original preview edges. F3 reports reference-world coordinates. Physics and rendering retain their existing local coordinate offset.
 
@@ -220,7 +220,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, P
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.14.0/minicraft-v0.14.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.14.1/minicraft-v0.14.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 
