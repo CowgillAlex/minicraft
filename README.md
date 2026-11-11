@@ -1,6 +1,16 @@
 # MiniCraft
 
-A native Rust voxel world explorer with 6.25 cm voxels. The default scene streams an infinite horizontal world with biome-driven surface layers and 3D aquifers from the Paper-Minecraft worldgen port, sampled at its original metre scale. It includes editable voxels, ambient occlusion, lighting, a controllable day/night cycle, native menus, collisions and gravity. The previous village with cabins, lamps and editable hinged doors is available with `--scene village`.
+A native Rust voxel world explorer with 6.25 cm voxels. Each cubic metre contains a 16 × 16 × 16 grid of individually editable voxels.
+
+Explore an infinite world with branching trees, seeded grass, flowers, underwater plants, caves and occasional cottages. Warm lamplight passes through glass, doors swing on their hinges, and a day/night cycle changes the view as you travel. Terrain generation comes from [Paper-Minecraft](https://github.com/CowgillAlex/Paper-Minecraft), sampled at its original metre scale with sixteen times the resolution along each axis.
+
+![A lit cottage among grass and branching trees beneath a purple night sky](docs/screenshots/cottage-at-night.png)
+
+Screenshots from Alex's world, seed `8349847389`.
+
+| Cottage lamplight | Moonlit shore |
+| --- | --- |
+| ![Warm cottage light illuminating wheat and the surrounding grass](docs/screenshots/cottage-lamplight.png) | ![A tree silhouetted against the moon, with shadows stretching across the water](docs/screenshots/moonlit-shore.png) |
 
 ## Windows download
 
