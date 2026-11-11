@@ -51,7 +51,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("Left / Right click", "Break / place a voxel"),
                 ("Middle click", "Pick material"),
                 ("E", "Open / close a door"),
-                ("1 - 0", "Select material"),
+                ("1 - 0 / Tab", "Hotbar / all materials"),
                 ("B / N", "Glass / door handle"),
                 ("- / =", "Earlier / later time"),
                 ("F1 / F3", "Controls / debug info"),
@@ -63,6 +63,16 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 hud.text(key, p.x + 28.0, y, 14.0, ACCENT);
                 hud.text(description, p.x + 224.0, y, 14.0, TEXT);
             }
+        }
+        Panel::Materials => {
+            hud.styled_text("Materials", p.x + 26.0, p.y + 24.0, 24.0, TEXT, true);
+            hud.text(
+                "Choose a material. Tab returns to the world.",
+                p.x + 26.0,
+                p.y + 54.0,
+                12.0,
+                MUTED,
+            );
         }
         Panel::View => crate::ui_view::draw(hud, layout, stats.view),
         Panel::Settings => {
@@ -91,6 +101,52 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
     let pointer = ui.pointer.map(|v| v / layout.scale);
     for b in layout.buttons(ui.panel) {
         let hovered = b.rect.contains(pointer);
+        if let Action::Material(id) = b.action {
+            let selected = id == stats.material;
+            hud.rounded_rect(
+                b.rect,
+                6.0,
+                if selected {
+                    ACCENT
+                } else if hovered {
+                    [0.20, 0.25, 0.26, 1.0]
+                } else {
+                    [0.095, 0.12, 0.135, 1.0]
+                },
+            );
+            crate::ui_icons::block(hud, b.rect.x + 40.0, b.rect.y + 3.0, 20.0, id);
+            let split = if b.label.len() > 17 {
+                b.label[..17].rfind(' ')
+            } else {
+                None
+            };
+            let fg = if selected {
+                [0.035, 0.075, 0.045, 1.0]
+            } else {
+                TEXT
+            };
+            if let Some(i) = split {
+                hud.centered(
+                    &b.label[..i],
+                    b.rect.x + 50.0,
+                    b.rect.y + 27.0,
+                    10.0,
+                    fg,
+                    false,
+                );
+                hud.centered(
+                    &b.label[i + 1..],
+                    b.rect.x + 50.0,
+                    b.rect.y + 38.0,
+                    10.0,
+                    fg,
+                    false,
+                );
+            } else {
+                hud.centered(b.label, b.rect.x + 50.0, b.rect.y + 31.0, 10.0, fg, false);
+            }
+            continue;
+        }
         let bg = if b.primary {
             if hovered {
                 [0.73, 0.91, 0.70, 1.0]

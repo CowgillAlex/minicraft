@@ -43,31 +43,35 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     if !(320..=7680).contains(&width) || !(240..=4320).contains(&height) {
         return Err("Capture dimensions must be between 320x240 and 7680x4320".into());
     }
-    let captured = match ui.unwrap_or("play") {
-        "play" => true,
-        "debug" => {
-            renderer.ui.debug = true;
-            true
-        }
-        "pause" => false,
-        "controls" => {
-            renderer.ui.panel = crate::ui::Panel::Controls;
-            false
-        }
-        "view-settings" => {
-            renderer.ui.panel = crate::ui::Panel::View;
-            false
-        }
-        "settings" => {
-            renderer.ui.panel = crate::ui::Panel::Settings;
-            false
-        }
-        _ => {
-            return Err(
-                "--ui expects play, pause, controls, settings, view-settings, or debug".into(),
-            )
-        }
-    };
+    let captured =
+        match ui.unwrap_or("play") {
+            "play" => true,
+            "debug" => {
+                renderer.ui.debug = true;
+                true
+            }
+            "pause" => false,
+            "controls" => {
+                renderer.ui.panel = crate::ui::Panel::Controls;
+                false
+            }
+            "view-settings" => {
+                renderer.ui.panel = crate::ui::Panel::View;
+                false
+            }
+            "materials" => {
+                renderer.ui.panel = crate::ui::Panel::Materials;
+                false
+            }
+            "settings" => {
+                renderer.ui.panel = crate::ui::Panel::Settings;
+                false
+            }
+            _ => return Err(
+                "--ui expects play, pause, controls, settings, view-settings, materials, or debug"
+                    .into(),
+            ),
+        };
     let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("offscreen capture"),
         size: wgpu::Extent3d {

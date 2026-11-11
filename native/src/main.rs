@@ -17,6 +17,7 @@ mod light_field;
 mod light_tiles;
 mod light_volume;
 mod local_light;
+mod materials;
 mod mesh;
 mod mesh_stream;
 mod occlusion;

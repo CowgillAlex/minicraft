@@ -27,6 +27,7 @@ impl Density {
                 noises: Vec::new(),
                 blended: Vec::new(),
                 roots: [0; 5],
+                climate: [0; 6],
                 min_y: number(&data["noise"], "min_y")? as i32,
                 height: number(&data["noise"], "height")? as i32,
                 sea_level: number(&data, "sea_level")? as i32,
@@ -45,6 +46,19 @@ impl Density {
         .enumerate()
         {
             builder.graph.roots[index] = builder.parse(&data["router"][name])?;
+        }
+        for (i, name) in [
+            "temperature",
+            "vegetation",
+            "continents",
+            "erosion",
+            "depth",
+            "ridges",
+        ]
+        .iter()
+        .enumerate()
+        {
+            builder.graph.climate[i] = builder.parse(&data["router"][name])?;
         }
         Ok(builder.graph)
     }
@@ -70,32 +84,10 @@ impl Builder<'_> {
         if let Some(index) = self.noises.get(name) {
             return Ok(*index);
         }
-        let params = &self.data["noises"][name];
-        let octave = params
-            .get("base_octave")
-            .or_else(|| params.get("firstOctave"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0) as i32;
-        let values = params
-            .get("amplitudes")
-            .or_else(|| params.get("amplitude_modifiers"))
-            .and_then(Value::as_array)
-            .ok_or_else(|| format!("Missing noise {name}"))?;
-        let mut amplitudes: Vec<f64> = values
-            .iter()
-            .map(|v| v.as_f64().ok_or("Invalid amplitude".to_string()))
-            .collect::<Result<_, _>>()?;
-        if let Some(count) = params["octave_count"].as_u64() {
-            amplitudes.resize(amplitudes.len().max(count as usize), 0.0);
-        }
-        if let Some(base) = params["base_amplitude"].as_f64() {
-            amplitudes.insert(0, base);
-        }
-        let mut source = Random::new(self.seed).named(&format!("minecraft:{name}"));
         let index = self.graph.noises.len();
         self.graph
             .noises
-            .push(Normal::new(&mut source, octave, &amplitudes));
+            .push(normal(self.seed, name, &self.data["noises"][name])?);
         self.noises.insert(name.to_owned(), index);
         Ok(index)
     }
@@ -242,4 +234,29 @@ impl Builder<'_> {
         self.graph.nodes.push(node);
         Ok(id)
     }
+}
+
+pub(super) fn normal(seed: i64, name: &str, params: &Value) -> Result<Normal, String> {
+    let octave = params
+        .get("base_octave")
+        .or_else(|| params.get("firstOctave"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0) as i32;
+    let values = params
+        .get("amplitudes")
+        .or_else(|| params.get("amplitude_modifiers"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("Missing noise {name}"))?;
+    let mut amplitudes: Vec<f64> = values
+        .iter()
+        .map(|v| v.as_f64().ok_or("Invalid amplitude".to_string()))
+        .collect::<Result<_, _>>()?;
+    if let Some(count) = params["octave_count"].as_u64() {
+        amplitudes.resize(amplitudes.len().max(count as usize), 0.0);
+    }
+    if let Some(base) = params["base_amplitude"].as_f64() {
+        amplitudes.insert(0, base);
+    }
+    let mut source = Random::new(seed).named(&format!("minecraft:{name}"));
+    Ok(Normal::new(&mut source, octave, &amplitudes))
 }

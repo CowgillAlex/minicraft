@@ -58,6 +58,12 @@ impl App {
         use ui::{Action, Panel};
         match action {
             Action::Resume => self.capture_cursor(true),
+            Action::Material(id) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.selected_material = id;
+                }
+                self.capture_cursor(true);
+            }
             Action::Title => self.return_to_title(),
             Action::Vsync => {
                 self.vsync = !self.vsync;
@@ -89,6 +95,21 @@ impl App {
     }
     pub(super) fn handle_ui_key(&mut self, key: KeyCode) -> bool {
         match key {
+            KeyCode::Tab => {
+                if !self.captured
+                    && self
+                        .renderer
+                        .as_ref()
+                        .is_some_and(|r| r.ui.panel == ui::Panel::Materials)
+                {
+                    self.capture_cursor(true);
+                } else {
+                    self.capture_cursor(false);
+                    if let Some(r) = &mut self.renderer {
+                        r.ui.panel = ui::Panel::Materials;
+                    }
+                }
+            }
             KeyCode::Escape => {
                 if self.captured {
                     if let Some(renderer) = &mut self.renderer {

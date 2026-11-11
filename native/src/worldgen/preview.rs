@@ -19,6 +19,7 @@ pub struct Preview {
     pub height_m: i32,
     pub reference: bool,
     pub infinite: bool,
+    pub surfaces: bool,
 }
 
 impl Default for Preview {
@@ -29,6 +30,7 @@ impl Default for Preview {
             height_m: 384,
             reference: false,
             infinite: true,
+            surfaces: false,
         }
     }
 }
@@ -54,7 +56,10 @@ impl Scene {
         match value("--scene")?.unwrap_or("noise") {
             "village" => Ok(Self::Village),
             "noise" => {
-                let mut preview = Preview::default();
+                let mut preview = Preview {
+                    surfaces: !args.iter().any(|a| a == "--noise-only"),
+                    ..Preview::default()
+                };
                 if let Some(height) = value("--height")? {
                     preview.height_m = height
                         .parse()

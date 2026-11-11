@@ -241,7 +241,7 @@ impl Mesh {
                                     position: World::meters(point[0], point[1], point[2])
                                         .to_array(),
                                     normal,
-                                    color: world::color(face.material),
+                                    color: crate::materials::face_color(face.material, normal[1]),
                                     ao: face.ao.map(|value| 0.38 + value as f32 * (0.62 / 3.0)),
                                     uv: [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]][corner],
                                     material: face.material as f32,

@@ -85,6 +85,7 @@ pub struct Density {
     pub noises: Vec<Normal>,
     pub blended: Vec<Blended>,
     pub roots: [Id; 5],
+    pub climate: [Id; 6],
     pub min_y: i32,
     pub height: i32,
     pub sea_level: i32,

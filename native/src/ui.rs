@@ -7,6 +7,7 @@ pub enum Panel {
     Controls,
     Settings,
     View,
+    Materials,
 }
 #[derive(Default)]
 pub struct UiState {
@@ -36,6 +37,7 @@ pub enum Action {
     BackToSettings,
     Earlier,
     Later,
+    Material(u8),
 }
 #[derive(Clone, Copy)]
 pub struct Rect {
@@ -78,6 +80,7 @@ impl Layout {
             Panel::Controls => (520.0, 516.0),
             Panel::Settings => (440.0, 550.0),
             Panel::View => (480.0, 534.0),
+            Panel::Materials => (680.0, 562.0),
         };
         Rect {
             x: (self.width - w) / 2.0,
@@ -111,6 +114,26 @@ impl Layout {
             }
             Panel::View => return crate::ui_view::buttons(self),
             Panel::Controls => add(448.0, "Back", Action::Back, false),
+            Panel::Materials => {
+                add(494.0, "Back to world", Action::Resume, false);
+                for (i, m) in crate::materials::ALL
+                    .iter()
+                    .filter(|m| m.id != crate::world::AIR)
+                    .enumerate()
+                {
+                    buttons.push(Button {
+                        rect: Rect {
+                            x: p.x + 24.0 + (i % 6) as f32 * 106.0,
+                            y: p.y + 76.0 + (i / 6) as f32 * 58.0,
+                            w: 100.0,
+                            h: 52.0,
+                        },
+                        label: m.name,
+                        action: Action::Material(m.id),
+                        primary: false,
+                    });
+                }
+            }
             Panel::Settings => {
                 add(80.0, "Distance & fog", Action::View, false);
                 add(134.0, "Ambient occlusion", Action::AmbientOcclusion, false);
@@ -203,7 +226,7 @@ mod tests {
         );
         for size in [(800, 600), (1440, 900), (3840, 2160)] {
             let layout = Layout::new(size);
-            for panel in [Panel::Settings, Panel::View] {
+            for panel in [Panel::Settings, Panel::View, Panel::Materials] {
                 let bounds = layout.panel(panel);
                 for button in layout.buttons(panel) {
                     assert!(button.rect.y + button.rect.h <= layout.height);

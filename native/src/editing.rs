@@ -103,24 +103,7 @@ pub fn affected_chunks(cell: [i32; 3], height: i32) -> Vec<[i32; 3]> {
     chunks
 }
 pub fn material_name(material: u8) -> &'static str {
-    match material {
-        world::STONE => "STONE",
-        world::GRASS => "GRASS",
-        world::DIRT => "DIRT",
-        world::WOOD => "WOOD",
-        world::LEAF => "LEAVES",
-        world::ROOF => "ROOF",
-        world::WALL => "PLASTER",
-        world::SAND => "SAND",
-        world::ROAD => "ASPHALT",
-        world::LIGHT => "LAMP",
-        world::GLASS => "GLASS",
-        world::HANDLE => "HANDLE",
-        world::WATER => "WATER",
-        world::FLOWER => "FLOWER",
-        world::PAINT => "ROAD PAINT",
-        _ => "UNKNOWN",
-    }
+    crate::materials::get(material).name
 }
 pub fn outline(hit: Hit) -> [[f32; 3]; 24] {
     let min = World::meters(hit.cell[0], hit.cell[1], hit.cell[2]) - Vec3::splat(0.001);

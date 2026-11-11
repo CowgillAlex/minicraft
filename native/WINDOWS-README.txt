@@ -1,7 +1,7 @@
-MINICRAFT v0.12.0
+MINICRAFT v0.13.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.12.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.13.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -17,6 +17,8 @@ Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
 A compact bottom hotbar shows block previews and the selected material.
+Tab opens a dark picker for all 39 materials. Click to select and return
+to the world, or press Tab again to close it.
 Esc opens the clickable world menu. Settings control AO, VSync, voxel
 outlines, and time of day. Use local time follows the computer clock in
 its local timezone, including while menus are open. This option is off
@@ -66,6 +68,7 @@ Middle click: pick the targeted material
 1-0: Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
 B: select Glass
 N: select Handle
+Tab: choose any material
 A mint outline highlights the target within 8 metres. Edits reset on exit.
 
 DOORS
@@ -110,9 +113,9 @@ not a separate ray-traced point shadow for every lamp.
 
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
-The default scene streams an infinite horizontal world containing only stone,
-water and air. It ports the Paper-Minecraft PR #1 density graph and aquifer
-rules. Terrain is sampled every 6.25 cm at its original scale. The title
+The default scene streams an infinite horizontal world with biome-driven
+surfaces. It ports the Paper-Minecraft PR #1 density graph, aquifer, biome
+selection and surface rules. Terrain is sampled every 6.25 cm at its original scale. The title
 screen chooses the seed. The default source origin is 120,-64,-20, covering
 the full -64 to 320 metre vertical range. Only nearby terrain is resident.
 
@@ -142,7 +145,8 @@ Optional launch arguments:
 --height 384 --origin 0,-64,0 Choose another full-height source origin.
 --scene village               Open the previous village with doors and lamps.
 --noise-sample 120.0625,63,0   Print density and material without a GPU.
---noise-benchmark             Measure a 32-cubed voxel page without a GPU.
+--noise-benchmark             Measure a raw 32-cubed voxel page without a GPU.
+--noise-only                  Disable biome surface decoration.
 --worldgen-benchmark          Time a finite 40 metre wide volume.
 --reference-worldgen         Disable uniform skipping/prepared evaluation.
 
@@ -151,8 +155,14 @@ barriers. Fluid regions vary along both horizontal axes instead of extruding
 the old 2D layout. Terrain density and its original metre scale are unchanged.
 Water is translucent: shallow water reveals the bottom and deeper water
 adds blue tint. Animated reflections and day/night shadows remain active.
-There are no generated surfaces, ores, buildings, trees or other features
-in the noise preview. All existing building materials remain selectable.
+Surface rules add grass/dirt, gravel seabeds, sand/sandstone, red sand,
+badlands terracotta bands, mountain snow/ice/calcite, mud, podzol, mycelium,
+sulfur/cinnabar, and bedrock/deepslate transitions. Layer depths retain metre
+scale; a one-metre layer is 16 tiny voxels deep. Surface decoration runs on
+the terrain workers and does not require loaded neighboring pages.
+There are no generated ores, buildings, trees or other features yet.
+All materials are selectable with Tab or middle-click. Ice and powder snow
+currently behave as opaque solid blocks.
 Walking has gravity, jumping, wall sliding and half-metre step-up. Both
 walking and flight collide with individual fine voxels, including glass.
 Water and flowers do not collide; swimming is not simulated yet.

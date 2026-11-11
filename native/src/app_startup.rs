@@ -122,7 +122,11 @@ impl App {
         let seed = if let crate::worldgen::preview::Scene::Noise(preview) = self.scene {
             Some(preview.seed)
         } else {
-            self.scene = crate::worldgen::preview::Scene::Noise(Default::default());
+            self.scene =
+                crate::worldgen::preview::Scene::Noise(crate::worldgen::preview::Preview {
+                    surfaces: true,
+                    ..Default::default()
+                });
             None
         };
         let mut title = crate::title::Title::new(seed);

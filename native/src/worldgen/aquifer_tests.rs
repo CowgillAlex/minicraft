@@ -22,6 +22,7 @@ fn field(surface_low: bool, floodedness: f64) -> Density {
         noises: Vec::new(),
         blended: Vec::new(),
         roots: [0, 1, 2, 3, 4],
+        climate: [0; 6],
         min_y: -64,
         height: 384,
         sea_level: 63,

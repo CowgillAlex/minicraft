@@ -223,7 +223,29 @@
       "noise": "minecraft:aquifer_fluid_level_spread",
       "xz_scale": 1.0,
       "y_scale": 0.7142857142857143
-    }
+    },
+    "temperature": {
+      "type": "minecraft:shifted_noise",
+      "noise": "minecraft:temperature",
+      "shift_x": "minecraft:shift_x",
+      "shift_y": 0.0,
+      "shift_z": "minecraft:shift_z",
+      "xz_scale": 0.25,
+      "y_scale": 0.0
+    },
+    "vegetation": {
+      "type": "minecraft:shifted_noise",
+      "noise": "minecraft:vegetation",
+      "shift_x": "minecraft:shift_x",
+      "shift_y": 0.0,
+      "shift_z": "minecraft:shift_z",
+      "xz_scale": 0.25,
+      "y_scale": 0.0
+    },
+    "continents": "minecraft:overworld/continents",
+    "erosion": "minecraft:overworld/erosion",
+    "depth": "minecraft:overworld/depth",
+    "ridges": "minecraft:overworld/ridges"
   },
   "density_functions": {
     "overworld/sloped_cheese": {
@@ -3628,6 +3650,28 @@
         1.0
       ],
       "firstOctave": -5
+    },
+    "temperature": {
+      "amplitudes": [
+        1.5,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "firstOctave": -10
+    },
+    "vegetation": {
+      "amplitudes": [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "firstOctave": -8
     }
   }
 }

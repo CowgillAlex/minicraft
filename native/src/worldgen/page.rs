@@ -10,6 +10,21 @@ pub struct Generated {
 }
 
 pub fn generate(preview: Preview, sampler: &mut TerrainSampler<'_>, origin: [i32; 3]) -> Generated {
+    let mut generated = generate_raw(preview, sampler, origin);
+    if preview.surfaces && generated.data.occupied() > 0 {
+        sampler.decorate(
+            std::array::from_fn(|i| origin[i] + preview.origin[i] * 16),
+            &mut generated.data,
+        );
+    }
+    generated
+}
+
+pub fn generate_raw(
+    preview: Preview,
+    sampler: &mut TerrainSampler<'_>,
+    origin: [i32; 3],
+) -> Generated {
     if !preview.reference {
         let min = preview.point(origin);
         let max = preview.point(origin.map(|v| v + CHUNK as i32 - 1));

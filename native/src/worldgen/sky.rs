@@ -97,7 +97,11 @@ pub(crate) fn sample_column(
         let lo = (y + preview.origin[1] * 16).div_euclid(128) * 128 - preview.origin[1] * 16;
         let lo = lo.max(0);
         let uniform = if overrides.range(lo..=y).next().is_none() {
-            sampler.uniform_material(preview.point([x, lo, z]), preview.point([x, y, z]))
+            sampler.light_uniform(
+                preview.point([x, lo, z]),
+                preview.point([x, y, z]),
+                preview.surfaces,
+            )
         } else {
             None
         };
@@ -124,10 +128,9 @@ pub(crate) fn sample_column(
         }
         let mut stop = false;
         for yy in (lo..=y).rev() {
-            let material = overrides
-                .get(&yy)
-                .copied()
-                .unwrap_or_else(|| sampler.material_fast(preview.point([x, yy, z])));
+            let material = overrides.get(&yy).copied().unwrap_or_else(|| {
+                sampler.light_material(preview.point([x, yy, z]), preview.surfaces)
+            });
             if world::opaque(material) {
                 column.blocked = yy;
                 stop = true;

@@ -43,6 +43,15 @@ impl Chunk {
             Arc::make_mut(cells)[index] = material;
         }
     }
+    /// Restore compact storage after a bulk material pass.
+    pub fn compact(&mut self) {
+        if let Self::Dense { cells, .. } = self {
+            let material = cells[0];
+            if cells.iter().all(|v| *v == material) {
+                *self = Self::Uniform(material);
+            }
+        }
+    }
     pub fn occupied(&self) -> usize {
         match self {
             Self::Uniform(AIR) => 0,

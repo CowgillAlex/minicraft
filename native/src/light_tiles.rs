@@ -118,8 +118,10 @@ impl LightSource for Source<'_, '_, '_> {
         } else if let Some(m) = self.world.override_at(p) {
             m
         } else {
-            self.sampler
-                .material_fast(self.world.noise_preview.unwrap().point(p))
+            self.sampler.light_material(
+                self.world.noise_preview.unwrap().point(p),
+                self.world.noise_preview.unwrap().surfaces,
+            )
         }
     }
     fn sky(&mut self, p: [i32; 2], min_y: i32, len: usize) -> Vec<u8> {
@@ -157,14 +159,18 @@ pub(crate) fn generate(
     let uniform = if !world.contains(min) || !world.contains(max) || world.has_changes(min, max) {
         None
     } else {
-        sampler.uniform_material(preview.point(min), preview.point(max))
+        sampler.light_uniform(preview.point(min), preview.point(max), preview.surfaces)
     };
     let core_max = origin.map(|v| v + 30);
     let core =
         if !world.contains(min) || !world.contains(core_max) || world.has_changes(min, core_max) {
             None
         } else {
-            sampler.uniform_material(preview.point(min), preview.point(core_max))
+            sampler.light_uniform(
+                preview.point(min),
+                preview.point(core_max),
+                preview.surfaces,
+            )
         };
     if let Some(material) = uniform {
         edges.fill(light_field::loss(material).saturating_mul(5));
@@ -199,7 +205,7 @@ pub(crate) fn generate(
                                 } else if let Some(m) = world.override_at(p) {
                                     m
                                 } else {
-                                    sampler.material_fast(preview.point(p))
+                                    sampler.light_material(preview.point(p), preview.surfaces)
                                 };
                                 values[index] = m;
                                 m

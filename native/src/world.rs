@@ -21,23 +21,7 @@ pub const WIDTH: i32 = (NX * CHUNK) as i32;
 pub const DEPTH: i32 = (NZ * CHUNK) as i32;
 pub const HEIGHT: i32 = (NY * CHUNK) as i32;
 pub const VOXEL: f32 = 1.0 / 16.0;
-pub const AIR: u8 = 0;
-pub const GRASS: u8 = 1;
-pub const DIRT: u8 = 2;
-pub const STONE: u8 = 3;
-pub const ROAD: u8 = 4;
-pub const PAINT: u8 = 5;
-pub const WOOD: u8 = 6;
-pub const LEAF: u8 = 7;
-pub const ROOF: u8 = 8;
-pub const LIGHT: u8 = 9;
-pub const WATER: u8 = 10;
-pub const FLOWER: u8 = 11;
-pub const WALL: u8 = 12;
-pub const SAND: u8 = 13;
-
-pub const GLASS: u8 = 14;
-pub const HANDLE: u8 = 15;
+pub use crate::materials::*;
 
 pub fn opaque(material: u8) -> bool {
     material != AIR && material != GLASS && material != WATER
@@ -330,24 +314,7 @@ fn lake_distance(x: i32, z: i32) -> f32 {
     ((x - 460) as f32 / 105.0).powi(2) + ((z - 155) as f32 / 69.0).powi(2)
 }
 pub fn color(material: u8) -> [f32; 3] {
-    match material {
-        GRASS => [0.27, 0.46, 0.26],
-        DIRT => [0.32, 0.23, 0.17],
-        STONE => [0.43, 0.47, 0.46],
-        ROAD => [0.16, 0.20, 0.22],
-        PAINT => [0.93, 0.72, 0.35],
-        WOOD => [0.34, 0.22, 0.14],
-        LEAF => [0.22, 0.43, 0.28],
-        ROOF => [0.32, 0.39, 0.43],
-        LIGHT => [1.0, 0.69, 0.28],
-        WATER => [0.15, 0.43, 0.47],
-        FLOWER => [0.86, 0.58, 0.39],
-        WALL => [0.77, 0.68, 0.50],
-        SAND => [0.59, 0.53, 0.35],
-        GLASS => [0.55, 0.77, 0.82],
-        HANDLE => [0.82, 0.62, 0.25],
-        _ => [1.0, 0.0, 1.0],
-    }
+    crate::materials::get(material).color
 }
 
 #[cfg(test)]

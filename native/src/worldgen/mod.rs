@@ -1,4 +1,5 @@
 mod aquifer;
+mod biomes;
 mod config;
 mod density;
 mod fast_density;
@@ -7,6 +8,8 @@ pub(crate) mod page;
 pub mod preview;
 mod random;
 pub(crate) mod sky;
+mod surface;
+mod surface_rules;
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +20,7 @@ pub struct Generator {
     density: Density,
     seed: i64,
     plan: Option<fast_density::Plan>,
+    surface: surface::Surface,
 }
 
 pub struct TerrainSampler<'a> {
@@ -25,6 +29,8 @@ pub struct TerrainSampler<'a> {
     plan: Option<fast_density::Plan>,
     prepared_cells: [Option<([i32; 3], fast_density::Prepared)>; 16],
     uniform_cells: std::collections::HashMap<[i32; 3], Option<u8>>,
+    surface: &'a surface::Surface,
+    surface_cache: surface::Cache,
 }
 
 impl Generator {
@@ -35,6 +41,7 @@ impl Generator {
             density,
             seed,
             plan,
+            surface: surface::Surface::new(seed)?,
         })
     }
 
@@ -45,6 +52,8 @@ impl Generator {
             plan: self.plan,
             prepared_cells: [None; 16],
             uniform_cells: Default::default(),
+            surface: &self.surface,
+            surface_cache: Default::default(),
         }
     }
 }
@@ -54,6 +63,41 @@ impl TerrainSampler<'_> {
         self.density.root(0, point)
     }
 
+    pub fn climate(&mut self, point: [f64; 3]) -> [f64; 6] {
+        std::array::from_fn(|i| self.density.eval(self.density.density.climate[i], point))
+    }
+    pub fn depth(&mut self, point: [f64; 3]) -> f64 {
+        self.density.eval(self.density.density.climate[4], point)
+    }
+    pub fn decorate(&mut self, origin: [i32; 3], data: &mut crate::chunk::Chunk) {
+        let mut cache = std::mem::take(&mut self.surface_cache);
+        cache.decorate(self.surface, self, origin, data);
+        self.surface_cache = cache;
+    }
+    pub fn light_material(&mut self, point: [f64; 3], surfaces: bool) -> u8 {
+        let raw = self.material_fast(point);
+        if raw != crate::world::STONE || !surfaces {
+            return raw;
+        }
+        let mut cache = std::mem::take(&mut self.surface_cache);
+        let m = if cache.affects_light(self.surface, self, point) {
+            cache.material(self.surface, self, point)
+        } else {
+            raw
+        };
+        self.surface_cache = cache;
+        m
+    }
+    pub fn light_uniform(&mut self, min: [f64; 3], max: [f64; 3], surfaces: bool) -> Option<u8> {
+        let raw = self.uniform_material(min, max)?;
+        if raw != crate::world::STONE || !surfaces {
+            return Some(raw);
+        }
+        let mut cache = std::mem::take(&mut self.surface_cache);
+        let affects = cache.affects_box(self.surface, self, min, max);
+        self.surface_cache = cache;
+        (!affects).then_some(raw)
+    }
     pub fn material(&mut self, point: [f64; 3]) -> u8 {
         let value = self.density(point);
         self.aquifer.substance(&mut self.density, point, value)
@@ -61,6 +105,10 @@ impl TerrainSampler<'_> {
 
     /// The same density expression as page fills, cached by interpolation cell.
     pub fn material_fast(&mut self, point: [f64; 3]) -> u8 {
+        let value = self.density_fast(point);
+        self.aquifer.substance(&mut self.density, point, value)
+    }
+    pub fn density_fast(&mut self, point: [f64; 3]) -> f64 {
         let key =
             std::array::from_fn::<_, 3, _>(|i| (point[i] / [4.0, 8.0, 4.0][i]).floor() as i32);
         let slot = ((key[0].wrapping_mul(3) ^ key[1].wrapping_mul(5) ^ key[2].wrapping_mul(7))
@@ -74,12 +122,11 @@ impl TerrainSampler<'_> {
         }
         let value =
             self.prepared_cells[slot].map_or_else(|| self.density(point), |(_, p)| p.sample(point));
-        let value = if value.abs() < 1e-10 {
+        if value.abs() < 1e-10 {
             self.density(point)
         } else {
             value
-        };
-        self.aquifer.substance(&mut self.density, point, value)
+        }
     }
 
     pub fn uniform_material(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<u8> {
