@@ -12,6 +12,10 @@ Screenshots from Alex's world, seed `8349847389`.
 | --- | --- |
 | ![Warm cottage light illuminating wheat and the surrounding grass](docs/screenshots/cottage-lamplight.png) | ![A tree silhouetted against the moon, with shadows stretching across the water](docs/screenshots/moonlit-shore.png) |
 
+## Windows download
+
+Download the latest Windows x64 executable or ZIP from [GitHub Releases](https://github.com/CowgillAlex/minicraft/releases/latest). The [changelog](CHANGELOG.md) records every archived version back to the first Cedar Voxel Lab build.
+
 ## Build and run
 
 Install [Rust](https://rustup.rs/) and a GPU driver with Vulkan, DirectX 12 or OpenGL support, then run from the repository root:
