@@ -1,7 +1,7 @@
-MINICRAFT v0.13.1
+MINICRAFT v0.14.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.13.1-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.14.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -31,9 +31,12 @@ with night vision. Outdoor fog retains the sky colour.
 Fog start scales with render distance. The default is 24 metres of terrain,
 fog starting at 20 metres, and 100% strength. Restore defaults resets these
 controls. Changes apply immediately; extra meshes load in the background.
+Adaptive terrain detail reduces distant mesh geometry and memory while
+keeping nearby voxels exact. Disable it here to compare full distant detail.
 Longer distances take more time to generate and draw more geometry. Bounded
 caches may fill before the selected distance is reached in dense caves.
-Loading terrain shows pending work; Terrain cache full indicates this limit.
+Loading terrain shows pending work. F3 reports memory pressure. The cache
+prioritizes the view and replaces less useful regions as you move or turn.
 F1 shows controls and F3 shows debug info. Night vision is in Settings or
 on F6. It reveals dark caves without changing the clock or rebaking light.
 Title screen in the world menu lets you choose another seed. Creating a new
@@ -126,6 +129,10 @@ Uniform parts of mixed pages are skipped exactly during generation. Lighting
 samples cached transport rays instead of generating full hidden voxel halos.
 Exposed-face bit masks keep solid and enclosed water interiors out of meshing.
 Static vertices are packed on workers before upload to keep frames responsive.
+Distant meshes use conservative LOD with locked page/material boundaries.
+Near geometry, collision, editing, water/glass and doors retain full detail.
+Fine color/AO patterns fade below pixel size to reduce distant shimmer.
+Fine density sampling is unchanged in this first LOD pass.
 Terrain, meshes and light stream within render distance plus a 4 metre margin.
 Collision data loads first along an 8 metre corridor in your travel direction.
 Walking and flight stop at terrain that has not yet loaded. Spectator can travel ahead of
@@ -143,6 +150,7 @@ Optional launch arguments:
 --seed 1                     Choose a signed 64-bit seed.
 --height 12                  Restrict vertical range near sea level.
 --finite                     Use the old finite 40 metre wide preview.
+--no-lod                     Full detail in headless screenshot comparisons.
 --origin 120,58,-20           Choose lower corner; defaults to 12m height.
 --height 384 --origin 0,-64,0 Choose another full-height source origin.
 --scene village               Open the previous village with doors and lamps.
@@ -180,3 +188,7 @@ a Windows error dialog. This build is not code-signed.
 FONT
 DejaVu Sans UI type. The font notice is embedded and available with
 --licenses, and included as FONT-LICENSE.txt in the ZIP package.
+
+THIRD-PARTY NOTICES
+Meshopt and meshoptimizer notices are embedded, printed by --licenses,
+and included as THIRD-PARTY-LICENSES.txt in the ZIP package.

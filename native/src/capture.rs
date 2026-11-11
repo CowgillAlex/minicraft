@@ -16,6 +16,7 @@ pub struct CaptureOptions<'a> {
     pub transparency: bool,
     pub distance: Option<u16>,
     pub fog: bool,
+    pub lod: bool,
     pub view: Option<&'a str>,
     pub hours: Option<f32>,
 }
@@ -34,6 +35,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         transparency,
         distance,
         fog,
+        lod,
         view: shadow_view,
         hours,
     } = options;
@@ -91,6 +93,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         renderer.view.set_distance(distance)?;
     }
     renderer.view.fog = fog;
+    renderer.view.lod = lod;
     renderer.ao_enabled = ao_enabled;
     renderer.night_vision = night_vision;
     renderer.transparency_enabled = transparency;

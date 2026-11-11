@@ -338,7 +338,7 @@ impl Renderer {
                 &self.queue,
                 &self.lighting.layout,
                 camera,
-                self.view.cache_radius(),
+                self.view,
             ) {
                 self.shadow_ready = false;
             }
@@ -366,7 +366,7 @@ impl Renderer {
             &self.queue,
             &self.lighting.layout,
             camera,
-            self.view.cache_radius(),
+            self.view,
         ) {
             self.stream_shadows_dirty = true;
         }
@@ -712,3 +712,7 @@ mod sky_tests;
 #[cfg(test)]
 #[path = "infinite_render_tests.rs"]
 mod infinite_render_tests;
+
+#[cfg(test)]
+#[path = "lod_tests.rs"]
+mod lod_tests;

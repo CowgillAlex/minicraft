@@ -53,15 +53,13 @@ pub fn candidates(
                 if visible(key, position, radius)
                     && world.contains([x * CELLS, y * CELLS, z * CELLS])
                 {
-                    let offset = center(key) - position;
-                    let distance = offset.length();
-                    let facing = offset.normalize_or_zero().dot(direction);
-                    let ahead = offset.normalize_or_zero().dot(travel);
-                    let score = if distance < 8.0 {
-                        distance - 100.0
-                    } else {
-                        distance * (1.3 - facing * 0.55 - ahead * 0.25)
-                    };
+                    let score = crate::terrain_budget::View {
+                        position,
+                        direction,
+                        travel,
+                        radius,
+                    }
+                    .priority(key);
                     keys.push((key, score));
                 }
             }
@@ -71,6 +69,7 @@ pub fn candidates(
     keys.into_iter().map(|(key, _)| key).collect()
 }
 pub struct Region {
+    pub level: crate::terrain_lod::Level,
     pub key: Key,
     pub revision: u64,
     pub pages: Vec<(Key, Chunk)>,
@@ -93,7 +92,7 @@ pub struct Builder<'a> {
     published: HashSet<Key>,
     lights: HashMap<Key, (Arc<[u8]>, u64)>,
     clock: u64,
-    meshes: HashMap<Key, CachedMesh>,
+    meshes: HashMap<(Key, crate::terrain_lod::Level), CachedMesh>,
     mesh_bytes: usize,
     tiles: crate::light_tiles::Tiles,
     pages: Option<crate::terrain_pages::Pages>,
@@ -138,7 +137,7 @@ impl<'a> Builder<'a> {
                 std::array::from_fn::<_, 3, _>(|i| cells.iter().map(|p| p[i]).min().unwrap() - 1);
             let max =
                 std::array::from_fn::<_, 3, _>(|i| cells.iter().map(|p| p[i]).max().unwrap() + 1);
-            self.meshes.retain(|key, _| {
+            self.meshes.retain(|(key, _), _| {
                 !(0..3).all(|i| key[i] * 128 <= max[i] && key[i] * 128 + 128 > min[i])
             });
             self.mesh_bytes = self.meshes.values().map(|m| m.cpu).sum();
@@ -165,6 +164,22 @@ impl<'a> Builder<'a> {
         focus: Vec3,
         cancel: impl Fn() -> bool,
     ) -> Option<Region> {
+        self.build_lod(
+            key,
+            revision,
+            focus,
+            crate::terrain_lod::Level::desired(key, focus),
+            cancel,
+        )
+    }
+    pub fn build_lod(
+        &mut self,
+        key: Key,
+        revision: u64,
+        focus: Vec3,
+        level: crate::terrain_lod::Level,
+        cancel: impl Fn() -> bool,
+    ) -> Option<Region> {
         let started = std::time::Instant::now();
         let mut phases = [0.0; 4];
         let mut local_field = None;
@@ -172,7 +187,7 @@ impl<'a> Builder<'a> {
         self.ensure(key, 0, &cancel, &mut added)?;
         phases[0] = started.elapsed().as_secs_f64();
         self.clock = self.clock.wrapping_add(1);
-        let (meshes, mut bytes) = if let Some(cache) = self.meshes.get_mut(&key) {
+        let (meshes, mut bytes) = if let Some(cache) = self.meshes.get_mut(&(key, level)) {
             cache.used = self.clock;
             (cache.meshes.clone(), cache.gpu)
         } else {
@@ -200,12 +215,10 @@ impl<'a> Builder<'a> {
                             continue;
                         }
                         let mesh = Mesh::build_chunk(&self.world, page);
-                        bytes += mesh.vertices.len()
-                            * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
-                            + (mesh.indices.len() + mesh.transparent_indices.len()) * 4;
+                        let mesh = crate::terrain_lod::reduce(mesh, page, level);
+                        bytes += mesh.bytes();
                         if !mesh.vertices.is_empty() {
-                            meshes
-                                .push((page, Arc::new(crate::gpu_vertex::PackedMesh::from(mesh))));
+                            meshes.push((page, Arc::new(mesh)));
                         }
                     }
                 }
@@ -232,7 +245,7 @@ impl<'a> Builder<'a> {
                     self.mesh_bytes -= self.meshes.remove(&old).unwrap().cpu;
                 }
                 self.meshes.insert(
-                    key,
+                    (key, level),
                     CachedMesh {
                         meshes: meshes.clone(),
                         gpu: bytes,
@@ -330,6 +343,7 @@ impl<'a> Builder<'a> {
             })
             .collect();
         Some(Region {
+            level,
             key,
             revision,
             pages,

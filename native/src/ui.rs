@@ -79,7 +79,7 @@ impl Layout {
             Panel::Pause => (360.0, 348.0),
             Panel::Controls => (520.0, 516.0),
             Panel::Settings => (440.0, 550.0),
-            Panel::View => (480.0, 534.0),
+            Panel::View => (480.0, 588.0),
             Panel::Materials => (680.0, 562.0),
         };
         Rect {

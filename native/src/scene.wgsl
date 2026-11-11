@@ -41,6 +41,7 @@ struct VertexOut {
     @location(3) @interpolate(flat) ao: vec4<f32>,
     @location(5) uv: vec2<f32>,
     @location(4) @interpolate(flat) material: f32,
+    @location(6) @interpolate(flat) coarse: f32,
 };
 @vertex fn vs_world(v: VertexIn) -> VertexOut {
     var out: VertexOut;
@@ -51,6 +52,7 @@ struct VertexOut {
     out.ao = v.ao;
     out.uv = v.uv;
     out.material = round(v.color.a * 255.0);
+    out.coarse = v.normal.w;
     return out;
 }
 @vertex fn vs_shadow(v: VertexIn) -> @builtin(position) vec4<f32> {
@@ -120,7 +122,11 @@ fn fog_sky(direction:vec3<f32>,skylight:f32) -> vec3<f32> {
 }
 struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32> };
 @fragment fn fs_world(v: VertexOut) -> SurfaceOut {
-    let normal = normalize(v.normal);
+    var normal = normalize(v.normal);
+    let plane=normalize(cross(dpdx(v.world),dpdy(v.world)));
+    if v.coarse>0.5 {
+        normal=select(-plane,plane,dot(plane,normal)>=0.0);
+    }
     let direction = normalize(v.world - scene.camera.xyz);
     let sunlight = max(dot(normal, scene.sun.xyz), 0.0);
     let field=lighting_at(v.world,normal);
@@ -135,8 +141,10 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     var base = pow(v.color, vec3(2.2));
     let voxel = floor(v.world * 16.0 + normal * -0.01);
     let noise = fract(sin(dot(voxel, vec3(12.9898, 78.233, 39.425))) * 43758.5453);
-    base *= 0.94 + noise * 0.12;
-    let voxel_ao = mix(mix(v.ao.x,v.ao.y,v.uv.x),mix(v.ao.w,v.ao.z,v.uv.x),v.uv.y);
+    let footprint=max(length(dpdx(v.world)),length(dpdy(v.world)))*16.0;
+    let detail=1.0-smoothstep(0.5,2.0,footprint);
+    base *= 1.0 + (noise-0.5)*0.12*detail;
+    let voxel_ao = mix(1.0,mix(mix(v.ao.x,v.ao.y,v.uv.x),mix(v.ao.w,v.ao.z,v.uv.x),v.uv.y),1.0-smoothstep(0.75,2.5,footprint));
     let sky_tint=mix(vec3(0.018,0.035,0.075),vec3(0.29,0.41,0.59),scene.daylight.x);
     let sky_light=max(sky_tint*pow(field.y,1.35),vec3(0.48,0.55,0.64)*scene.light_color.w)*(0.7+0.3*max(normal.y,0.0));
     let block_light=vec3(1.0,0.78,0.55)*pow(field.x,2.0)*3.2;

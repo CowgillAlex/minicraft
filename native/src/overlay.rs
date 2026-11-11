@@ -114,15 +114,6 @@ pub fn vertices(
     if stats.lighting_pending {
         hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
     }
-    if stats.terrain_full {
-        hud.text(
-            "Terrain cache full",
-            layout.width - 144.0,
-            104.0,
-            12.0,
-            MUTED,
-        );
-    }
     if stats.meshes_pending {
         hud.text(
             "Loading terrain",
@@ -301,6 +292,16 @@ fn debug(
             "AO {}  /  VSync {}",
             if stats.ao_enabled { "on" } else { "off" },
             if vsync { "on" } else { "off" }
+        ),
+        format!(
+            "Terrain {}",
+            if stats.terrain_full {
+                "view prioritized / memory limit"
+            } else if stats.meshes_pending {
+                "streaming"
+            } else {
+                "ready"
+            }
         ),
         format!("Biome {}", stats.biome.unwrap_or("Village scene")),
         stats

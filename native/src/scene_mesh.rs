@@ -182,17 +182,28 @@ impl SceneMesh {
         }
         Some(edit.light)
     }
+    #[cfg(test)]
+    pub fn test_lod(&mut self, device: &wgpu::Device, level: crate::terrain_lod::Level) {
+        let pages: Vec<_> = self.world.pages().map(|(key, _)| key).collect();
+        for page in pages {
+            let mesh =
+                crate::terrain_lod::reduce(Mesh::build_chunk(&self.world, page), page, level);
+            self.replacements
+                .insert(page, gpu_chunk_packed(device, page, &mesh));
+        }
+    }
     pub fn update_stream(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         camera: &crate::camera::Camera,
-        radius: f32,
+        settings: crate::view_settings::ViewSettings,
     ) -> bool {
+        let radius = settings.cache_radius();
         let position = camera.position;
         if let Some(mut terrain) = self.terrain.take() {
-            let changed = terrain.update(self, device, queue, layout, camera, radius);
+            let changed = terrain.update(self, device, queue, layout, camera, settings);
             self.terrain = Some(terrain);
             return changed;
         }

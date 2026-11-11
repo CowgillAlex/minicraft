@@ -33,6 +33,8 @@ mod startup;
 mod startup_ui;
 #[cfg(test)]
 mod terrain_bench;
+mod terrain_budget;
+mod terrain_lod;
 mod terrain_pages;
 mod terrain_region;
 mod terrain_stream;
@@ -431,7 +433,11 @@ impl ApplicationHandler for App {
 fn run() -> std::result::Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--licenses") {
-        println!("{}", include_str!("../assets/FONT-LICENSE.txt"));
+        println!(
+            "{}\n{}",
+            include_str!("../assets/FONT-LICENSE.txt"),
+            include_str!("../assets/THIRD-PARTY-LICENSES.txt")
+        );
         return Ok(());
     }
     if args.iter().any(|arg| arg == "--version") {
@@ -541,6 +547,7 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
                     })
                     .transpose()?,
                 fog: !args.iter().any(|arg| arg == "--no-fog"),
+                lod: !args.iter().any(|arg| arg == "--no-lod"),
                 view: args
                     .iter()
                     .position(|arg| arg == "--shadow-view" || arg == "--view")

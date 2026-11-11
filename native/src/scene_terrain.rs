@@ -2,15 +2,22 @@ use super::{buffer, gpu_chunk_packed, GpuChunk, SceneMesh};
 use crate::{
     light_volume::RegionLight,
     startup::Progress,
+    terrain_budget::{self, Loaded, View},
+    terrain_lod::Level,
     terrain_region::{self, Key, Region},
     terrain_stream::Stream,
     world::World,
     worldgen::{sky::Sky, Generator},
 };
 use glam::Vec3;
-use std::{collections::HashMap, sync::mpsc::TryRecvError, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::mpsc::TryRecvError,
+    time::Instant,
+};
 
 pub(super) struct Resident {
+    level: Level,
     light: Option<RegionLight>,
     bytes: usize,
     valid: bool,
@@ -52,7 +59,13 @@ impl SceneMesh {
             sky,
             position + Vec3::Y * crate::physics::EYE_HEIGHT,
             radius,
-            HashMap::from([(key, initial.bytes)]),
+            HashMap::from([(
+                key,
+                Loaded {
+                    bytes: initial.bytes,
+                    level: initial.level,
+                },
+            )]),
         );
         let local = crate::local_light::LocalLight::new(world.noise_preview.unwrap());
         Ok(Self {
@@ -171,15 +184,28 @@ impl Terrain {
     pub(super) fn invalidate_order(&mut self) {
         self.draw_order.clear();
     }
-    fn loaded(&self) -> HashMap<Key, usize> {
+    fn loaded(&self) -> HashMap<Key, Loaded> {
         self.regions
             .iter()
             .filter(|(_, v)| v.valid)
-            .map(|(k, v)| (*k, v.bytes))
+            .map(|(k, v)| {
+                (
+                    *k,
+                    Loaded {
+                        bytes: v.bytes,
+                        level: v.level,
+                    },
+                )
+            })
             .collect()
     }
     pub(super) fn pending(&self) -> bool {
         self.pending.is_some() || self.stream.pending() || self.local.pending()
+    }
+    fn refresh(&mut self) {
+        let loaded = self.loaded();
+        self.stream
+            .request(self.position, self.radius, loaded, None);
     }
     fn begin(
         &mut self,
@@ -198,6 +224,19 @@ impl Terrain {
         if region.revision != self.stream.revision
             || !terrain_region::visible(region.key, self.position, self.radius)
         {
+            return;
+        }
+        let required = if self.stream.lod {
+            Level::select(
+                region.key,
+                self.position,
+                self.regions.get(&region.key).map(|r| r.level),
+            )
+        } else {
+            Level::Full
+        };
+        if region.level > required {
+            self.refresh();
             return;
         }
         if let Some(field) = region.field.take() {
@@ -228,40 +267,44 @@ impl Terrain {
         while start.elapsed().as_micros() < budget as u128 && bytes < 8 * 1024 * 1024 {
             let Some((key, mesh)) = pending.meshes.next() else {
                 let pending = self.pending.take().unwrap();
-                let existing = self.regions.get(&pending.region.key).map_or(0, |r| r.bytes);
-                let mut total = self.regions.values().map(|r| r.bytes).sum::<usize>() - existing
-                    + pending.region.bytes;
-                if total > terrain_region::MESH_BUDGET {
+                let loaded = self
+                    .regions
+                    .iter()
+                    .map(|(k, r)| {
+                        (
+                            *k,
+                            Loaded {
+                                bytes: r.bytes,
+                                level: r.level,
+                            },
+                        )
+                    })
+                    .collect();
+                let view = View {
+                    position: self.position,
+                    direction: self.stream.direction,
+                    travel: Vec3::ZERO,
+                    radius: self.radius,
+                };
+                let Some(victims) = terrain_budget::victims(
+                    &loaded,
+                    pending.region.key,
+                    pending.region.bytes,
+                    view,
+                    terrain_region::MESH_BUDGET,
+                ) else {
                     self.stream.mark_full();
-                    if !self.regions.contains_key(&pending.region.key)
-                        && terrain_region::center(pending.region.key).distance(self.position) > 16.0
-                    {
-                        return false;
-                    }
-                    let mut far: Vec<_> = self
-                        .regions
-                        .keys()
-                        .copied()
-                        .filter(|key| {
-                            *key != pending.region.key
-                                && terrain_region::center(*key).distance(self.position) > 16.0
-                        })
-                        .collect();
-                    far.sort_by(|a, b| {
-                        terrain_region::center(*b)
-                            .distance_squared(self.position)
-                            .total_cmp(&terrain_region::center(*a).distance_squared(self.position))
-                    });
-                    for key in far {
-                        if total <= terrain_region::MESH_BUDGET {
-                            break;
-                        }
-                        total -= self.regions.remove(&key).unwrap().bytes;
-                        scene
-                            .replacements
-                            .retain(|page, _| terrain_region::page_region(*page) != key);
-                    }
-                }
+                    self.refresh();
+                    return false;
+                };
+                let refresh = !victims.is_empty()
+                    || (self.stream.lod
+                        && Level::select(
+                            pending.region.key,
+                            self.position,
+                            Some(pending.region.level),
+                        ) != pending.region.level);
+                self.evict(scene, &victims);
                 scene
                     .replacements
                     .retain(|key, _| terrain_region::page_region(*key) != pending.region.key);
@@ -269,12 +312,16 @@ impl Terrain {
                 self.regions.insert(
                     pending.region.key,
                     Resident {
+                        level: pending.region.level,
                         light: pending.light,
                         bytes: pending.region.bytes,
                         valid: true,
                         light_revision: pending.region.revision,
                     },
                 );
+                if refresh {
+                    self.refresh();
+                }
                 return true;
             };
             bytes += mesh.vertices.len() * std::mem::size_of::<crate::gpu_vertex::GpuVertex>()
@@ -285,6 +332,15 @@ impl Terrain {
         }
         false
     }
+    fn evict(&mut self, scene: &mut SceneMesh, keys: &[Key]) {
+        let keys: HashSet<_> = keys.iter().copied().collect();
+        for key in &keys {
+            self.regions.remove(key);
+        }
+        scene
+            .replacements
+            .retain(|page, _| !keys.contains(&terrain_region::page_region(*page)));
+    }
     pub(super) fn update(
         &mut self,
         scene: &mut SceneMesh,
@@ -292,8 +348,12 @@ impl Terrain {
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         camera: &crate::camera::Camera,
-        radius: f32,
+        settings: crate::view_settings::ViewSettings,
     ) -> bool {
+        let radius = settings.cache_radius();
+        let lod = settings.lod;
+        let detail_changed = self.stream.lod != lod;
+        self.stream.lod = lod;
         let position = camera.position;
         let direction = camera.direction();
         let turned = self.stream.direction.dot(direction) < 0.9;
@@ -330,6 +390,7 @@ impl Terrain {
         if crate::mesh_stream::center(position) != self.stream.center
             || radius != self.stream.radius
             || turned
+            || detail_changed
         {
             let before = self.regions.len();
             self.regions
@@ -349,6 +410,13 @@ impl Terrain {
                         self.stream.received();
                         for (key, data) in pages {
                             scene.world.insert_page(key, data);
+                        }
+                    }
+                    Ok(Ok(crate::terrain_stream::Update::MeshesEvicted { keys, epoch })) => {
+                        self.stream.received();
+                        if self.stream.is_current(epoch) {
+                            self.evict(scene, &keys);
+                            changed = true;
                         }
                     }
                     Ok(Ok(crate::terrain_stream::Update::Evicted(keys))) => {

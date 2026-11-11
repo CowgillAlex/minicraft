@@ -173,6 +173,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             Action::NightVision => Some(stats.night_vision),
             Action::LocalTime => Some(stats.local_time),
             Action::ViewChange(crate::view_settings::Change::Fog) => Some(stats.view.fog),
+            Action::ViewChange(crate::view_settings::Change::Lod) => Some(stats.view.lod),
             _ => None,
         };
         if let Some(enabled) = toggle {

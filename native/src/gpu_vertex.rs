@@ -11,6 +11,15 @@ pub struct GpuVertex {
     ao: [u8; 4],
     uv: [u16; 2],
 }
+impl GpuVertex {
+    #[cfg(test)]
+    pub fn position(&self) -> [f32; 3] {
+        self.position
+    }
+    pub fn coarse(&mut self) {
+        self.normal[3] = 127;
+    }
+}
 pub fn pack(vertices: &[Vertex]) -> Vec<GpuVertex> {
     vertices
         .iter()
@@ -39,6 +48,12 @@ pub struct PackedMesh {
     pub vertices: Vec<GpuVertex>,
     pub indices: Vec<u32>,
     pub transparent_indices: Vec<u32>,
+}
+impl PackedMesh {
+    pub fn bytes(&self) -> usize {
+        self.vertices.len() * std::mem::size_of::<GpuVertex>()
+            + (self.indices.len() + self.transparent_indices.len()) * 4
+    }
 }
 impl From<crate::mesh::Mesh> for PackedMesh {
     fn from(mesh: crate::mesh::Mesh) -> Self {

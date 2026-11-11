@@ -11,6 +11,7 @@ pub enum Change {
     Density(i8),
     Start(i8),
     Fog,
+    Lod,
     Reset,
 }
 
@@ -20,6 +21,7 @@ pub struct ViewSettings {
     density: usize,
     start: usize,
     pub fog: bool,
+    pub lod: bool,
 }
 impl Default for ViewSettings {
     fn default() -> Self {
@@ -28,6 +30,7 @@ impl Default for ViewSettings {
             density: 3,
             start: 5,
             fog: true,
+            lod: true,
         }
     }
 }
@@ -70,6 +73,7 @@ impl ViewSettings {
             Change::Density(delta) => self.density = adjust(self.density, delta, DENSITIES.len()),
             Change::Start(delta) => self.start = adjust(self.start, delta, STARTS.len()),
             Change::Fog => self.fog = !self.fog,
+            Change::Lod => self.lod = !self.lod,
             Change::Reset => *self = Self::default(),
         }
     }
