@@ -194,7 +194,6 @@ Water and flowers do not collide; swimming is not simulated yet.
 Physics ticks at 20 TPS; rendering interpolates positions between ticks
 and mouse look remains immediate. Menus freeze physics. Blocks cannot be
 placed inside your body. The world bottom and unloaded terrain are solid outside spectator mode.
-This version has no car physics or AI.
 
 ERRORS
 Startup errors write minicraft-error.txt beside the executable and display

@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)"
 name="minicraft-v${version}-windows-x64"
-output="../releases/v${version}"
+output="releases/v${version}"
 if [[ -e "${output}/${name}.exe" ]]; then
   echo "Release v${version} already exists. Bump Cargo.toml before packaging a new build." >&2
   exit 1

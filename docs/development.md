@@ -1,6 +1,8 @@
-# MiniCraft
+# MiniCraft development
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.15.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
+Run the commands in this guide from the repository root.
+
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.15.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`.
 
 ## System dependencies
 
@@ -71,7 +73,7 @@ Density parity tests retain all 5,496 samples from the original Java implementat
 python3 scripts/worldgen-reference.py /path/to/Paper-Minecraft
 ```
 
-Source details and the adapter changes are recorded in [the worldgen asset notes](assets/worldgen/README.md).
+Source details and the adapter changes are recorded in [the worldgen asset notes](../assets/worldgen/README.md).
 
 
 ### Biomes and surface rules
@@ -108,7 +110,7 @@ Cave fog and the sky backdrop fade to black according to the existing skylight f
 
 Fog can be disabled completely. Fog strength ranges from 25% to 200%, with 100% as the default. Fog start adjusts from the camera to 95% of render distance and scales when render distance changes. The default starts at 20 metres for a 24 metre render distance. Restore defaults returns all distance/fog controls together. Adaptive terrain detail is enabled by default in infinite worlds and can be disabled in the same menu. The village and finite diagnostic scenes keep their existing full meshes. These controls apply to both noise and village scenes. Larger distances increase generation, lighting and draw work. The caches may fill before the selected distance is reached in dense caves. Fog controls change shader parameters without rebuilding terrain or lighting.
 
-This is a rasterized mesh renderer with an editable material palette. The horizontal source coordinate limit is ±30 million metres, matching the existing source guard. Rendering and physics still use floats; a floating origin and terrain LOD remain future work. There are no disk saves, AI, or car simulation.
+This is a rasterized mesh renderer with an editable material palette. The horizontal source coordinate limit is ±30 million metres, matching the existing source guard. Rendering and physics still use floats; a floating origin remains future work. There are no disk saves.
 
 ## Distant detail
 
@@ -165,7 +167,7 @@ Physics runs at exactly 20 fixed steps per simulated second. The accumulator use
 
 Walking uses acceleration, gravity of 24 m/s², a 48 m/s terminal fall speed, and an 8.4 m/s jump impulse. Ctrl sprints, Shift slows walking, and F toggles flight with collisions. Space/Shift moves vertically in flight and Ctrl boosts it. Water currently has no swimming/buoyancy simulation. Collision boxes are resolved against individual 6.25 cm voxels; they are not snapped to metre-sized blocks.
 
-Alex's [Paper-Minecraft AABB](https://github.com/CowgillAlex/Paper-Minecraft/blob/main/core/src/main/java/dev/alexco/minecraft/phys/AABB.java) informed the swept-box/per-axis clipping approach. The full reference repository is cloned at `/home/alexc/.t3/projects/Paper-Minecraft` for future work. MiniCraft's collision implementation is three-dimensional and its fixed-step interpolation is separate from that reference.
+Alex's [Paper-Minecraft AABB](https://github.com/CowgillAlex/Paper-Minecraft/blob/main/core/src/main/java/dev/alexco/minecraft/phys/AABB.java) informed the swept-box/per-axis clipping approach. MiniCraft's collision implementation is three-dimensional and its fixed-step interpolation is separate from that reference.
 
 ## Streamed lighting
 
@@ -235,13 +237,13 @@ The fixed CPU streaming benchmark prepares four adjacent 8 metre regions at the 
 
 ## Windows builds
 
-On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, POSIX G++ and binutils packages (`g++-mingw-w64-x86-64-posix` on Debian/Ubuntu). Then run from this directory:
+On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, POSIX G++ and binutils packages (`g++-mingw-w64-x86-64-posix` on Debian/Ubuntu). Then run from the repository root:
 
 ```sh
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.15.0/minicraft-v0.15.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `releases/v0.15.0/minicraft-v0.15.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 

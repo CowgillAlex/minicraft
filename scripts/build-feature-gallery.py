@@ -17,7 +17,7 @@ if args.resources:
     from urllib.parse import urlparse
     for item in json.loads(args.resources.read_text())['items']:
         url=item['url']
-        if urlparse(url).scheme!='https' or urlparse(url).netloc!='img.kryptonote.com':raise ValueError('Unexpected screenshot host')
+        if urlparse(url).scheme!='https' or not urlparse(url).hostname:raise ValueError('Screenshot URLs must use HTTPS and include a hostname')
         remote[item['name'].removeprefix('minicraft-v0.15.0-')]=url
 shots=json.loads((args.input/'manifest.json').read_text())
 shots += [dict(name='natural-forest',file='natural-forest.png',kind='generated world',seed='1794358123416304200',origin='-1812,48,-2068',height=40,view='world-surface'),

@@ -12,27 +12,43 @@ Screenshots from Alex's world, seed `8349847389`.
 | --- | --- |
 | ![Warm cottage light illuminating wheat and the surrounding grass](docs/screenshots/cottage-lamplight.png) | ![A tree silhouetted against the moon, with shadows stretching across the water](docs/screenshots/moonlit-shore.png) |
 
-## Windows download
+## Build and run
 
-Version 0.15.0: [standalone executable](https://img.kryptonote.com/bdbc91ec-6f12-413d-a589-a47781133f06.exe) or [ZIP with controls and checksum](https://img.kryptonote.com/b122c43f-3a1d-451c-a019-e18a532b1cbc.zip). Downloads require access to Alex's resource host.
-
-Browse the [75-image feature gallery](https://img.kryptonote.com/a17d4b18-8b19-4e7b-b39b-9508cf8dad66.html) or download the [PNG gallery bundle](https://img.kryptonote.com/c47c9a29-19be-451a-8bf4-0e7fdfbd8095.zip). It includes every biome preview, plant/tree/cottage/mineral details, and two generated-world captures. Reference plots are labelled separately from natural placement.
-
-The world spans the source's full -64 to 320 metre vertical range. Terrain, meshes and light load near the player as you explore in any horizontal direction. Uniform 2 metre pages compress to one material value; bounded caches discard distant generated data. Your edits and doors remain in RAM when you leave and return, until you create another world or exit. Local light edits run independently of terrain loading. Nothing is saved to disk.
-
-Settings → Distance & fog controls adaptive terrain detail, render distance from 12 to 256 metres, fog strength, where fog starts, and whether fog is enabled. Underground fog and the backdrop fade to black using skylight exposure, including with night vision. The default remains 24 metres, with a 4 metre loading margin. A worker pool prioritizes the view and travel direction, with collision data loading ahead of visual work. Distant mesh LOD and filtering reduce geometry and subpixel shimmer while retaining exact nearby voxels. Under memory pressure, the cache replaces less useful regions as you move or turn. Its status is available in F3 rather than over the playing view. Cold terrain still takes time to prepare at large distances. Walking and flight stop at unloaded terrain; spectator can travel ahead of loading. `--seed`, `--origin X,Y,Z` and `--height` select the source coordinates and vertical range. `--finite` retains the old 40 metre wide preview. Terrain density is checked against 5,496 Java reference samples; another 3,564 samples check the 3D aquifer material decisions. Water is translucent, with depth tinting and visible shallow bottoms. Aquifer heights retain the source's exact one-metre surface scan; fine-voxel pressure centres and thin wet/dry seals correct spurious flooding and leaking boundaries.
-
-Surface rules add grass/dirt, sand and sandstone, gravel seabeds, badlands terracotta bands, snow, ice, calcite, mud, podzol, mycelium, sulfur/cinnabar, and bedrock/deepslate transitions. All 78 materials are available through Tab. Layer depths retain metre scale while the exposed shape retains 6.25 cm resolution. Biomes come from the source climate channels and ordered parameter table. Surface fixtures check 1,575 Java-generated synthetic columns and 3,584 biome selections. Biome features add branching trees, seeded grass, flowers, wheat, bamboo, fungi, cacti, cave growth and underwater plants/coral. Occasional cottages have working lamps and editable doors. Mineral inclusions use the source ore distributions. Plants generate mature and remain individually editable. Use `--noise-only` for the previous raw terrain view.
-
-The desktop opens to a dark title screen with a seed field. Enter a signed 64-bit number or leave it blank for a random world, then choose Create world. Terrain generation starts only after that choice. The loading screen stays responsive while the spawn area, lighting and graphics prepare in the background. Generation continues during play. It shows page counts and elapsed time; resize normally or press Escape to cancel. Generation reuses interpolation corners, prepares the bundled density expression once per page, and skips regions only when conservative bounds prove their material is uniform. It retains fine voxel sampling where needed.
-
-## Run from source
+Install [Rust](https://rustup.rs/) and a GPU driver with Vulkan, DirectX 12 or OpenGL support, then run from the repository root:
 
 ```sh
-cd native
 cargo run --release --locked
 ```
 
-Create a world, then choose Play or press Enter to play. WASD moves, Space jumps, Shift slows walking, and Ctrl sprints. F toggles flight, where Space/Shift fly up/down. F6 toggles night vision to reveal dark caves without changing the clock or propagated lighting. F5 toggles spectator mode, which passes through terrain without gravity. Use the flight controls and Ctrl to boost; returning requires clear space inside the world. Left-click breaks a voxel, right-click places one, number keys select materials, Tab opens the full material picker, and middle-click or # picks a material. B selects glass, N selects a door handle, and E opens/closes a targeted door. - and = move time backward and forward. Esc opens the world menu. F1 shows controls, F3 toggles debug info with the current biome and hovered block, and H hides the HUD. Settings includes Use local time to follow your computer clock. The world menu can return to the title screen to choose another seed. Edits reset when you create another world or exit.
+Linux system packages and Windows packaging instructions are in the [development guide](docs/development.md). Assets are embedded in the executable.
 
-See [the native app documentation](native/README.md) for renderer details, system dependencies, all controls, tests, and versioned Windows packaging. This version has no AI, driving physics, or persistent saves.
+Choose a seed on the title screen or leave it blank for a random world. Terrain, meshes and lighting stream as you explore. The world spans -64 to 320 metres vertically, with configurable render distance, fog and adaptive detail. Edits stay in memory while you explore, but nothing is saved to disk yet.
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| WASD / mouse | Move / look |
+| Space | Jump, or fly up |
+| Ctrl / Shift | Sprint / slow down; Shift flies down in flight |
+| F / F5 | Toggle flight / spectator mode |
+| Left / right click | Break / place a voxel |
+| Middle click or # | Pick the targeted material |
+| 1–0 / Tab | Select a hotbar material / open all materials |
+| E | Open or close a door |
+| - / = | Move time backward / forward |
+| F6 | Toggle night vision |
+| F1 / F3 / H | Controls / debug info / hide HUD |
+| Esc | World menu and settings |
+
+Settings include ambient occlusion, VSync, distance, fog and an option to follow your local clock. F3 shows the biome and targeted block. The [development guide](docs/development.md) lists all controls and command-line options.
+
+## Development
+
+The game is a single Rust crate. `src/` contains the game and renderer, `assets/` contains embedded resources and worldgen data, and `scripts/` contains packaging, reference-data and screenshot tools.
+
+```sh
+cargo test --release --locked
+```
+
+See the [development guide](docs/development.md) for renderer details, generation, lighting, tests and versioned Windows builds. The [worldgen source notes](assets/worldgen/README.md) describe the Paper-Minecraft port and MiniCraft's adaptations.
