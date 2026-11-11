@@ -1,5 +1,7 @@
 mod aquifer;
+mod biome_probe;
 mod biomes;
+pub use biome_probe::BiomeProbe;
 mod config;
 mod density;
 mod fast_density;

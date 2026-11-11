@@ -146,6 +146,23 @@ impl SceneMesh {
             .as_ref()
             .map(|light| &light.group)
     }
+    /// Empty air regions have no mesh or light texture. Sample the nearest
+    /// available brick at its boundary until the camera enters a lit region.
+    pub fn sky_light_at(&self, position: Vec3) -> Option<&wgpu::BindGroup> {
+        self.light_at(position).or_else(|| {
+            self.terrain
+                .as_ref()?
+                .regions
+                .iter()
+                .filter_map(|(key, region)| region.light.as_ref().map(|light| (key, light)))
+                .min_by(|(a, _), (b, _)| {
+                    terrain_region::center(**a)
+                        .distance_squared(position)
+                        .total_cmp(&terrain_region::center(**b).distance_squared(position))
+                })
+                .map(|(_, light)| &light.group)
+        })
+    }
     pub fn terrain_full(&self) -> bool {
         self.terrain.as_ref().is_some_and(|t| t.stream.full())
     }

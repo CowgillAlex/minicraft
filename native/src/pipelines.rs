@@ -134,7 +134,7 @@ impl Pipelines {
         });
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sky"),
-            layout: Some(&shadow_pipeline_layout),
+            layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_sky",

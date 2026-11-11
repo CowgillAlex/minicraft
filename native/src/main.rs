@@ -53,7 +53,7 @@ use winit::{
     application::ApplicationHandler,
     event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
+    keyboard::{Key, KeyCode, PhysicalKey},
     window::{Fullscreen, Window, WindowId},
 };
 
@@ -292,6 +292,14 @@ impl ApplicationHandler for App {
                         return;
                     }
                     if event.repeat {
+                        return;
+                    }
+                    if self.captured
+                        && matches!(&event.logical_key, Key::Character(value) if value == "#")
+                    {
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.pick_material(&self.camera);
+                        }
                         return;
                     }
                     if self.captured && key == KeyCode::Space {

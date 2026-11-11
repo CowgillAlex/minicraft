@@ -1,7 +1,7 @@
-MINICRAFT v0.13.0
+MINICRAFT v0.13.1
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.13.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.13.1-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -26,6 +26,8 @@ by default and lasts for the current session. Turning it off keeps the
 current time. The -/+ time buttons and -/= keys switch back to manual.
 Settings > Distance & fog adjusts render distance from 12 to 256 metres.
 Fog has an on/off toggle, a start distance and strength from 25% to 200%.
+Cave fog and its backdrop fade to black using skylight exposure, including
+with night vision. Outdoor fog retains the sky colour.
 Fog start scales with render distance. The default is 24 metres of terrain,
 fog starting at 20 metres, and 100% strength. Restore defaults resets these
 controls. Changes apply immediately; extra meshes load in the background.
@@ -54,7 +56,7 @@ Esc: world menu / back
 - / =: move time backward / forward. Hold to advance faster.
 R: return to a clear spawn
 F1: controls
-F3: debug info
+F3: debug info, including the current biome and hovered material
 H: hide/show playing HUD
 G: show voxel boundaries
 O: toggle ambient occlusion
@@ -64,7 +66,7 @@ F11: toggle fullscreen
 After capturing the mouse:
 Left click: break one voxel
 Right click: place one voxel against the targeted face
-Middle click: pick the targeted material
+Middle click / #: pick the targeted material
 1-0: Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
 B: select Glass
 N: select Handle
@@ -161,7 +163,7 @@ sulfur/cinnabar, and bedrock/deepslate transitions. Layer depths retain metre
 scale; a one-metre layer is 16 tiny voxels deep. Surface decoration runs on
 the terrain workers and does not require loaded neighboring pages.
 There are no generated ores, buildings, trees or other features yet.
-All materials are selectable with Tab or middle-click. Ice and powder snow
+All materials are selectable with Tab, middle-click or #. Ice and powder snow
 currently behave as opaque solid blocks.
 Walking has gravity, jumping, wall sliding and half-metre step-up. Both
 walking and flight collide with individual fine voxels, including glass.

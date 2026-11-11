@@ -309,3 +309,31 @@ fn surface_height_skips_preserve_the_source_one_metre_scan() {
         }
     }
 }
+
+#[test]
+fn debug_biome_follows_the_generated_grid_across_horizontal_and_vertical_travel() {
+    use crate::worldgen::{BiomeProbe, Generator};
+    for seed in [1, -67] {
+        let generator = Generator::new(seed).unwrap();
+        let mut sampler = generator.sampler();
+        let mut cache = Cache::default();
+        let mut probe = BiomeProbe::new(seed).unwrap();
+        for p in [
+            [-0.0625, 63.0, -4.0625],
+            [-0.0625, -40.0, -4.0625],
+            [-0.0625, -39.99, -4.0625],
+            [0.0, -40.0, -4.0],
+            [120.0, 63.0, -20.0],
+            [120.0, -64.0, -20.0],
+            [-0.0625, 63.0, -4.0625],
+        ] {
+            probe.update(p);
+            let id = cache.biome(&generator.surface, &mut sampler, p);
+            assert_eq!(
+                probe.name(),
+                generator.surface.biomes.name(id),
+                "debug biome {seed}/{p:?}"
+            );
+        }
+    }
+}

@@ -110,9 +110,13 @@ fn terrain_fog(distance:f32) -> f32 {
     let edge=smoothstep(scene.view.y,scene.view.x,distance)*scene.view.z;
     return clamp(max(haze,edge),0.0,1.0);
 }
-fn fog_sky(direction:vec3<f32>) -> vec3<f32> {
-    if streamed_world() { return sky_color(direction); }
-    return sky_color(vec3(direction.x,0.015,direction.z));
+fn sky_exposure(skylight:f32) -> f32 {
+    return smoothstep(0.02,0.45,skylight);
+}
+fn fog_sky(direction:vec3<f32>,skylight:f32) -> vec3<f32> {
+    var color=sky_color(vec3(direction.x,0.015,direction.z));
+    if streamed_world() { color=sky_color(direction); }
+    return color*sky_exposure(skylight);
 }
 struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32> };
 @fragment fn fs_world(v: VertexOut) -> SurfaceOut {
@@ -151,7 +155,7 @@ struct SurfaceOut { @location(0) color: vec4<f32>, @location(1) normal: vec4<f32
     }
     let distance = length(v.world - scene.camera.xyz);
     let fog = terrain_fog(distance);
-    color = mix(color, fog_sky(direction), fog);
+    color = mix(color, fog_sky(direction,field.y), fog);
     var out: SurfaceOut;
     out.color = vec4(color,1.0);
     out.normal = vec4(normal*0.5+0.5,ambient_fraction*(1.0-fog));
@@ -169,7 +173,11 @@ struct SkyOut { @builtin(position) position: vec4<f32>, @location(0) clip: vec2<
     let world = scene.inverse_view_proj * vec4(v.clip, 1.0, 1.0);
     let direction = normalize(world.xyz / world.w - scene.camera.xyz);
     var out: SurfaceOut;
-    out.color = vec4(visible_sky(direction),1.0);
+    // The camera may occupy an empty region. Its nearest loaded light brick
+    // still describes the surroundings; clamp to that brick's air boundary.
+    let camera_uv=(scene.camera.xyz-light_region.origin.xyz)/light_region.size.xyz;
+    let exposure=sky_exposure(textureSampleLevel(light_volume,light_sampler,clamp(camera_uv,vec3(0.0),vec3(1.0)),0.0).g);
+    out.color = vec4(visible_sky(direction)*exposure,1.0);
     out.normal = vec4(0.5,0.5,0.5,0.0);
     return out;
 }
@@ -232,6 +240,6 @@ fn shade_water(v: VertexOut, front: bool) -> vec4<f32> {
     var color = tint*(1.0-reflected/max(alpha,0.0001)) + reflection*reflected/max(alpha,0.0001);
     color += scene.light_color.rgb*scene.sun.w*specular*visibility*0.45;
     let fog = terrain_fog(distance);
-    color = mix(color,fog_sky(view),fog);
+    color = mix(color,fog_sky(view,field.y),fog);
     return vec4(tonemap(max(color,vec3(0.0))),alpha);
 }

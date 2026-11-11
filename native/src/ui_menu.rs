@@ -49,7 +49,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("F5 / F6", "Spectator / night vision"),
                 ("Ctrl / Scroll", "Boost / adjust speed"),
                 ("Left / Right click", "Break / place a voxel"),
-                ("Middle click", "Pick material"),
+                ("Middle click / #", "Pick material"),
                 ("E", "Open / close a door"),
                 ("1 - 0 / Tab", "Hotbar / all materials"),
                 ("B / N", "Glass / door handle"),

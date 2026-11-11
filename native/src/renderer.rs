@@ -75,6 +75,7 @@ pub struct Renderer {
     pub visible_triangles: usize,
     pub hud_enabled: bool,
     pub grid: bool,
+    biome_probe: Option<crate::worldgen::BiomeProbe>,
 }
 impl Renderer {
     pub async fn new(
@@ -102,6 +103,10 @@ impl Renderer {
         println!("Generating 6.25 cm voxel world...");
         let world = source.build_with_progress(progress)?;
         let voxel_count = world.voxels;
+        let biome_probe = world
+            .noise_preview
+            .map(|p| crate::worldgen::BiomeProbe::new(p.seed))
+            .transpose()?;
         println!(
             "{} voxels generated in {:.2}s. Meshing...",
             voxel_count,
@@ -267,6 +272,7 @@ impl Renderer {
             visible_triangles: 0,
             hud_enabled: true,
             grid: false,
+            biome_probe,
         })
     }
     pub fn world(&self) -> &World {
@@ -499,6 +505,14 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.uniform_group, &[]);
             pass.set_pipeline(&self.pipelines.sky_pipeline);
+            pass.set_bind_group(1, &self.shadow_group, &[]);
+            pass.set_bind_group(
+                2,
+                self.scene
+                    .sky_light_at(camera.position)
+                    .unwrap_or(&self.lighting.group),
+                &[],
+            );
             pass.draw(0..3, 0..1);
             pass.set_pipeline(&self.pipelines.world_pipeline);
             pass.set_bind_group(1, &self.shadow_group, &[]);
@@ -629,6 +643,16 @@ impl Renderer {
         vsync: bool,
     ) {
         let time = self.daylight.label();
+        if self.ui.debug {
+            if let (Some(probe), Some(preview)) =
+                (&mut self.biome_probe, self.scene.world.noise_preview)
+            {
+                let grid = crate::ray::grid_position(camera.position).to_array();
+                probe.update(std::array::from_fn(|i| {
+                    preview.origin[i] as f64 + grid[i] as f64 / 16.0
+                }));
+            }
+        }
         let vertices = crate::overlay::vertices(
             camera,
             size,
@@ -647,6 +671,8 @@ impl Renderer {
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
                 target: self.target.map(|t| t.hit(&self.scene.world)),
+                target_material: self.target.map(|t| t.material(&self.scene.world)),
+                biome: self.biome_probe.as_ref().map(|probe| probe.name()),
                 interaction: self.interaction_hint(),
                 time: &time,
                 lighting_pending: self.lighting.pending(),

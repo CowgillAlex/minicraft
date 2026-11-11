@@ -20,6 +20,8 @@ pub struct OverlayStats<'a> {
     pub interaction: Option<&'a str>,
     pub material: u8,
     pub target: Option<Hit>,
+    pub target_material: Option<u8>,
+    pub biome: Option<&'a str>,
     pub time: &'a str,
     pub lighting_pending: bool,
     pub meshes_pending: bool,
@@ -300,6 +302,11 @@ fn debug(
             if stats.ao_enabled { "on" } else { "off" },
             if vsync { "on" } else { "off" }
         ),
+        format!("Biome {}", stats.biome.unwrap_or("Village scene")),
+        stats
+            .target_material
+            .map(|id| format!("Block {}", crate::editing::material_name(id)))
+            .unwrap_or_else(|| "Block none".into()),
         stats
             .target
             .map(|h| format!("Target {:?} / {:.2}m", h.cell, h.distance))
@@ -310,7 +317,7 @@ fn debug(
             x: 20.0,
             y: 60.0,
             w: 320.0,
-            h: 214.0,
+            h: rows.len() as f32 * 23.0 + 30.0,
         },
         10.0,
         [0.025, 0.035, 0.04, 0.9],
