@@ -68,6 +68,28 @@ fn ao(v: &Vertex) -> f32 {
     let [u, w] = v.uv;
     (v.ao[0] * (1.0 - u) + v.ao[1] * u) * (1.0 - w) + (v.ao[3] * (1.0 - u) + v.ao[2] * u) * w
 }
+/// Reuse an exact source mesh when distance changes. Full-detail packing does
+/// not clone the larger CPU vertex array; simplification owns its working copy.
+pub fn reduce_cached(mesh: &Mesh, page: [i32; 3], level: Level) -> PackedMesh {
+    if level == Level::Full || mesh.indices.is_empty() {
+        return PackedMesh {
+            vertices: pack(&mesh.vertices),
+            indices: mesh.indices.clone(),
+            transparent_indices: mesh.transparent_indices.clone(),
+        };
+    }
+    reduce(
+        Mesh {
+            vertices: mesh.vertices.clone(),
+            indices: mesh.indices.clone(),
+            transparent_indices: mesh.transparent_indices.clone(),
+            batches: Vec::new(),
+            transparent_batches: Vec::new(),
+        },
+        page,
+        level,
+    )
+}
 pub fn reduce(mut mesh: Mesh, page: [i32; 3], level: Level) -> PackedMesh {
     if level == Level::Full || mesh.indices.is_empty() {
         return mesh.into();

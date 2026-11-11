@@ -1,5 +1,4 @@
 use super::noise::{lerp, Blended, Normal};
-use std::collections::HashMap;
 
 pub type Id = usize;
 #[path = "density_range.rs"]
@@ -96,8 +95,8 @@ pub struct Density {
 pub struct Sampler<'a> {
     pub density: &'a Density,
     last: Vec<Option<Cell>>,
-    cells: HashMap<(Id, [i32; 3]), [f64; 8]>,
-    corners: HashMap<(Id, [i32; 3]), f64>,
+    cells: crate::cache::Cache<(Id, [i32; 3]), [f64; 8], 2048>,
+    corners: crate::cache::Cache<(Id, [i32; 3]), f64, 8192>,
 }
 
 impl<'a> Sampler<'a> {
@@ -105,8 +104,8 @@ impl<'a> Sampler<'a> {
         Self {
             density,
             last: vec![None; density.nodes.len()],
-            cells: HashMap::new(),
-            corners: HashMap::new(),
+            cells: Default::default(),
+            corners: Default::default(),
         }
     }
 
@@ -302,15 +301,9 @@ impl<'a> Sampler<'a> {
                         argument,
                         std::array::from_fn(|axis| f64::from(corner[axis]) * sizes[axis]),
                     );
-                    if self.corners.len() >= 8192 {
-                        self.corners.clear();
-                    }
                     self.corners.insert((argument, corner), value);
                     value
                 });
-                if self.cells.len() >= 2048 {
-                    self.cells.clear();
-                }
                 self.cells.insert(key, values);
                 values
             };

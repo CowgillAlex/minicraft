@@ -2,12 +2,14 @@
 use super::biomes::{Id, Table};
 use serde_json::Value;
 use std::collections::BTreeMap;
+#[derive(Clone)]
 pub enum Rule {
     Sequence(Vec<Rule>),
     If(Condition, Box<Rule>),
     Block(u8),
     Bands,
 }
+#[derive(Clone)]
 pub enum Condition {
     Biome(Vec<Id>),
     Noise {
@@ -276,3 +278,6 @@ impl Condition {
         }
     }
 }
+
+#[path = "surface_span.rs"]
+mod span;

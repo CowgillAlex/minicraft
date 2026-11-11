@@ -1,8 +1,17 @@
 # Changelog
 
-Windows builds and their downloads are archived in [GitHub Releases](https://github.com/CowgillAlex/minicraft/releases). These notes were reconstructed from the saved build READMEs and retained commit history.
+Windows builds and their downloads are archived in [GitHub Releases](https://github.com/CowgillAlex/minicraft/releases). Historical notes were reconstructed from the saved build READMEs and retained commit history.
 
 Six builds were made between commits, so their exact source snapshots are unavailable: v0.1.0, v0.1.1, v0.1.2, v0.1.3, v0.2.0 and v0.6.1. Their release notes identify the later retained source snapshot used by the tag. The original Windows binaries are preserved unchanged.
+
+## [v0.16.0: Faster terrain streaming](https://github.com/CowgillAlex/minicraft/releases/tag/v0.16.0)
+
+- Give lighting its own exact feature-shape queries, without rasterizing full pages or generating ore deposits.
+- Reuse uniform base and resident-page proofs for transport queries, including replacements that preserve attenuation.
+- Retain recently used cache entries with bounded second-chance eviction, and share immutable feature plans between workers.
+- Specialize surface rules by biome and evaluate provably constant stone spans together, retaining literal evaluation where needed.
+- Replace full biome-table scans with an exact range index that preserves original ties and sampling positions.
+- Prepare page meshes on the worker pool and cache exact source geometry across LOD changes, with edit invalidation at page borders.
 
 ## [v0.15.0: Life at voxel scale](https://github.com/CowgillAlex/minicraft/releases/tag/v0.15.0)
 

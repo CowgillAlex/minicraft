@@ -98,3 +98,44 @@ fn lod_region_benchmark() {
         }
     }
 }
+
+/// Production feature streaming at fixed source positions, including cold,
+/// adjacent and cached-return builds. Run separately from other CPU benchmarks.
+#[test]
+#[ignore = "manual decorated flight benchmark"]
+fn decorated_flight_benchmark() {
+    for (name, seed, x, z) in [
+        ("forest", 1794358123416304200i64, -1800., -2056.),
+        ("savanna", 8349847389, 84., 28.),
+        ("aquifer surface", 1794358123416304200, 272., -140.),
+    ] {
+        let generator = Generator::new(seed).unwrap();
+        let ground = generator.sampler().feature_ground(x, z);
+        let eye = World::meters(
+            (x * 16.) as i32,
+            ((ground.y + 65.) * 16.) as i32,
+            (z * 16.) as i32,
+        );
+        let first = crate::terrain_region::key(eye);
+        let mut world = World::with_height(384 * 16);
+        world.infinite = true;
+        world.noise_preview = Some(Preview {
+            seed,
+            origin: [0, -64, 0],
+            surfaces: true,
+            features: true,
+            ..Default::default()
+        });
+        let mut builder = Builder::new(world, &generator, Sky::default());
+        for step in [0, 1, 2, 0] {
+            let key = [first[0] + step, first[1], first[2]];
+            let start = Instant::now();
+            let result = builder.build(key, 0, center(key), || false).unwrap();
+            println!(
+                "DECORATED {name} step={step} elapsed={:.5} bytes={}",
+                start.elapsed().as_secs_f64(),
+                result.bytes
+            );
+        }
+    }
+}

@@ -2,6 +2,7 @@
 mod app_startup;
 mod app_ui;
 mod bloom;
+mod cache;
 mod camera;
 mod capture;
 mod capture_views;
@@ -35,6 +36,7 @@ mod startup_ui;
 mod terrain_bench;
 mod terrain_budget;
 mod terrain_lod;
+mod terrain_meshes;
 mod terrain_pages;
 mod terrain_region;
 mod terrain_stream;

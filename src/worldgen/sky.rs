@@ -1,6 +1,5 @@
 use super::{preview::Preview, TerrainSampler};
 use crate::world::{self, World};
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub(crate) struct Column {
@@ -32,13 +31,10 @@ impl Column {
 }
 #[derive(Default)]
 pub struct Sky {
-    columns: HashMap<[i32; 2], Column>,
+    columns: crate::cache::Cache<[i32; 2], Column, 131072>,
 }
 impl Sky {
     pub fn missing(&mut self, origin: [i32; 3], size: [usize; 3]) -> Vec<[i32; 2]> {
-        if self.columns.len() + size[0] * size[2] > 131072 {
-            self.columns.clear();
-        }
         let mut points = Vec::new();
         for z in 0..size[2] {
             for x in 0..size[0] {
@@ -68,13 +64,11 @@ impl Sky {
         min_y: i32,
         len: usize,
     ) -> Vec<u8> {
-        if self.columns.len() > 131072 {
-            self.columns.clear();
+        if self.columns.get(&point).is_none() {
+            let column = sample_column(world, sampler, point);
+            self.columns.insert(point, column);
         }
-        let column = self
-            .columns
-            .entry(point)
-            .or_insert_with(|| sample_column(world, sampler, point));
+        let column = self.columns.get(&point).unwrap();
         (0..len)
             .map(|y| column.at(min_y + y as i32 * 4 + 2))
             .collect()
@@ -132,7 +126,7 @@ pub(crate) fn sample_column(
         let mut stop = false;
         for yy in (lo..=y).rev() {
             let material = overrides.get(&yy).copied().unwrap_or_else(|| {
-                sampler.world_material(
+                sampler.world_optical_material(
                     preview.point([x, yy, z]),
                     preview.surfaces,
                     preview.features,

@@ -75,10 +75,10 @@ pub fn column(sampler: &mut TerrainSampler<'_>, key: [i32; 3], seed: i64) -> Vec
                         |n| n as usize,
                     )
                 }
-                "minecraft:rarity_filter" => {
-                    if rng.index(modifier["chance"].as_u64().unwrap() as usize) != 0 {
-                        count = 0;
-                    }
+                "minecraft:rarity_filter"
+                    if rng.index(modifier["chance"].as_u64().unwrap() as usize) != 0 =>
+                {
+                    count = 0;
                 }
                 _ => {}
             }

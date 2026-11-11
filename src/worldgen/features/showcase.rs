@@ -2,6 +2,7 @@
 //! inspecting every biome treatment without searching a procedural world.
 use super::*;
 use crate::world::World;
+use std::collections::HashMap;
 #[derive(Clone, Copy, Debug)]
 pub enum Showcase {
     Biome(u8),

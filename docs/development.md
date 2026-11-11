@@ -2,7 +2,7 @@
 
 Run the commands in this guide from the repository root.
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.15.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.16.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`.
 
 ## System dependencies
 
@@ -90,6 +90,22 @@ python3 scripts/surface-reference.py /path/to/Paper-Minecraft
 cargo test --release --locked surface_streaming_benchmark -- --ignored --nocapture
 ```
 
+## Streaming performance
+
+Version 0.16 uses optical feature queries for lighting. Half-metre shape bins retain exact fine-voxel coverage and replacement priority; lighting no longer rasterizes whole feature pages or generates mineral deposits to inspect a point. Uniform base pages reuse exact material proofs. Workers share immutable deterministic surface/cave/ore plans, while bounded second-chance caches retain recent sampling, lighting and feature data instead of resetting wholesale.
+
+Surface rules are specialized by biome. Constant results over contiguous stone spans are applied together; uncertain spans split down to literal voxel evaluation. The nearest-climate index uses conservative range bounds and original table indices to preserve ties. Biome sampling still uses the existing four-metre grid.
+
+The persistent sampling pool also prepares independent page meshes. A separate 64 MiB cache retains exact source geometry so changing LOD does not repeat visibility, AO and greedy meshing. Edits invalidate affected pages and their boundary neighbors. The original shading, seam constraints and conservative simplifier remain unchanged. Terrain, collision and feature geometry retain their original voxel resolution.
+
+Run the fixed decorated-flight CPU survey separately from other benchmarks:
+
+```sh
+MINICRAFT_PROFILE_STREAM=1 cargo test --release --locked decorated_flight_benchmark -- --ignored --nocapture
+```
+
+A single-run CPU survey on the development host reduced cold decorated region preparation from approximately 5.77 to 4.19 seconds in the forest, 5.16 to 3.54 seconds in the savanna and 5.01 to 3.43 seconds at the aquifer surface. These include terrain, mesh and lighting work for an 8 metre region. The earlier diagnostic run included counters and CPU sampling, so these are approximate comparisons, not desktop FPS claims. Full-detail GPU byte counts match at all measured positions. The fixed LOD survey retained identical triangle counts and reduced subsequent detail changes from 115–124 ms to 26–47 ms by reusing source meshes.
+
 ## Renderer
 
 - Sparse allocation of 32³-voxel chunks. A uniform chunk stores one material value; a mixed chunk uses one byte per voxel. Editing a uniform chunk expands it. Dense chunks use copy-on-write storage so lighting and mesh workers can read a consistent snapshot.
@@ -104,7 +120,7 @@ cargo test --release --locked surface_streaming_benchmark -- --ignored --nocaptu
 - Linear HDR scene colour, filmic tone mapping, and a quarter-resolution bloom pass for subtle lamp glow.
 - Embedded WGSL shaders, a baked DejaVu Sans glyph atlas, and a single batched UI draw. Glyphs use one quad each rather than per-pixel geometry. Fonts, icons, and shaders are embedded; the executable needs no asset directory.
 
-A fixed finite seed-1 cave view at `--finite --height 48 --origin 134,20,-37 --view cave --size 960x600` submitted 1,086,694 triangles in 671 draws before the v0.9 changes, and 851,688 triangles in 479 draws afterward. The same nearby mesh cache fell from 244.2 to 118.6 MiB. Twenty warmed frames took 4.336 seconds before and 3.444 seconds afterward on software Vulkan. This measures local rendering cost, not expected Intel/Windows FPS. Dense cave geometry still needs substantial GPU work; no occlusion culling or terrain LOD is implemented.
+A fixed finite seed-1 cave view at `--finite --height 48 --origin 134,20,-37 --view cave --size 960x600` submitted 1,086,694 triangles in 671 draws before the v0.9 changes, and 851,688 triangles in 479 draws afterward. The same nearby mesh cache fell from 244.2 to 118.6 MiB. Twenty warmed frames took 4.336 seconds before and 3.444 seconds afterward on software Vulkan. This measures local rendering cost, not expected Intel/Windows FPS. Dense cave geometry still needs substantial GPU work; no occlusion culling is implemented.
 
 Cave fog and the sky backdrop fade to black according to the existing skylight field. Surface fog retains the sky color, with a smooth transition near entrances. Night vision brightens cave geometry without turning its fog blue. No extra light bake or CPU column scan is needed.
 
@@ -243,7 +259,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, P
 ./scripts/package-windows.sh
 ```
 
-This produces `releases/v0.15.0/minicraft-v0.15.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `releases/v0.16.0/minicraft-v0.16.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 

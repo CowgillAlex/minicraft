@@ -132,6 +132,21 @@ fn surface_rules_and_bands_match_pinned_java_on_synthetic_columns() {
             } else {
                 raw
             };
+            if raw == STONE {
+                let rule = &surface.by_biome[c.biome as usize];
+                assert_eq!(rule.apply(&mut c).unwrap_or(STONE), actual);
+                let high = c.y;
+                let low = (high - 2).max(-64);
+                if (low..=high).all(|y| c.raw(y) == STONE) {
+                    if let Some(proven) = rule.uniform_span(&mut c, low as f64) {
+                        for y in low..=high {
+                            c.y = y;
+                            assert_eq!(surface.rules.apply(&mut c), proven, "span {low}..{high}");
+                        }
+                        c.y = high;
+                    }
+                }
+            }
             if raw == STONE && matches!(actual, AIR | WATER) {
                 assert!(opacity_candidate);
                 assert!(surface.transparent.contains(&c.biome));

@@ -28,6 +28,16 @@ impl TerrainSampler<'_> {
             .apply(data);
         self.features = cache;
     }
+    pub fn world_optical_material(&mut self, p: [f64; 3], surfaces: bool, features: bool) -> u8 {
+        if !features {
+            return self.light_material(p, surfaces);
+        }
+        let mut cache = std::mem::take(&mut self.features);
+        let result = cache.optical(self, p, surfaces);
+        self.features = cache;
+        result
+    }
+    #[cfg(test)]
     pub fn world_material(&mut self, p: [f64; 3], surfaces: bool, features: bool) -> u8 {
         let base = self.light_material(p, surfaces);
         if !features {
@@ -49,6 +59,7 @@ impl TerrainSampler<'_> {
         self.features = cache;
         result
     }
+    /// A representative optical material, not an exact visual material ID.
     pub fn world_uniform(
         &mut self,
         min: [f64; 3],
@@ -61,7 +72,7 @@ impl TerrainSampler<'_> {
             return Some(base);
         }
         let mut cache = std::mem::take(&mut self.features);
-        let affects = cache.affects(self, min, max);
+        let affects = cache.affects(self, min, max, base);
         self.features = cache;
         (!affects).then_some(base)
     }

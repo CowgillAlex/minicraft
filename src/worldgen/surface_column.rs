@@ -4,7 +4,6 @@ use crate::{
     materials::*,
     worldgen::{biomes, random, surface_rules::Context as RuleContext, TerrainSampler},
 };
-use std::collections::HashMap;
 type Xz = [i32; 2];
 const MIN: i32 = -64 * 16;
 const MAX: i32 = 320 * 16;
@@ -28,9 +27,9 @@ struct BiomeColumn {
 }
 #[derive(Default)]
 pub struct Cache {
-    columns: HashMap<Xz, Column>,
-    heights: HashMap<Xz, f64>,
-    biomes: HashMap<Xz, BiomeColumn>,
+    columns: crate::cache::Cache<Xz, Column, 65536>,
+    heights: crate::cache::Cache<Xz, f64, 65536>,
+    biomes: crate::cache::Cache<Xz, BiomeColumn, 4096>,
 }
 fn point([x, z]: Xz, y: i32) -> [f64; 3] {
     [x as f64 / 16.0, y as f64 / 16.0, z as f64 / 16.0]
@@ -40,9 +39,6 @@ fn xz(p: [f64; 3]) -> Xz {
 }
 impl Cache {
     fn column(&mut self, surface: &Surface, key: Xz) -> Column {
-        if self.columns.len() >= 65536 {
-            self.columns.clear();
-        }
         self.columns.remove(&key).unwrap_or_else(|| {
             let p = point(key, 0);
             let noise = surface.noises[surface.surface].sample(p);
@@ -87,17 +83,32 @@ impl Cache {
                         p: point(key, origin[1]),
                         biome: None,
                     };
-                    for y in (0..32).rev() {
-                        let index = x + 32 * (z + 32 * y);
-                        if data.get(index) != STONE {
+                    let mut y = 31_i32;
+                    while y >= 0 {
+                        if data.get(x + 32 * (z + 32 * y as usize)) != STONE {
+                            y -= 1;
                             continue;
                         }
-                        context.p[1] = (origin[1] + y as i32) as f64 / 16.0;
-                        if let Some(material) = surface.rules.apply(&mut context) {
-                            if material != STONE {
-                                data.set(index, material);
-                            }
+                        let top = y;
+                        let band = (origin[1] + top + 1024).div_euclid(64);
+                        while y > 0
+                            && data.get(x + 32 * (z + 32 * (y - 1) as usize)) == STONE
+                            && (origin[1] + y - 1 + 1024).div_euclid(64) == band
+                        {
+                            y -= 1;
                         }
+                        context.p[1] = (origin[1] + top) as f64 / 16.;
+                        let id = RuleContext::biome(&mut context);
+                        paint_span(
+                            &surface.by_biome[id as usize],
+                            &mut context,
+                            data,
+                            [x, z],
+                            origin[1],
+                            y,
+                            top,
+                        );
+                        y -= 1;
                     }
                 }
                 self.columns.insert(key, column);
@@ -113,16 +124,17 @@ impl Cache {
     ) -> u8 {
         let key = xz(p);
         let mut column = self.column(surface, key);
-        let result = surface
-            .rules
-            .apply(&mut Context {
-                surface,
-                sampler,
-                cache: self,
-                column: &mut column,
-                p,
-                biome: None,
-            })
+        let mut context = Context {
+            surface,
+            sampler,
+            cache: self,
+            column: &mut column,
+            p,
+            biome: None,
+        };
+        let id = RuleContext::biome(&mut context);
+        let result = surface.by_biome[id as usize]
+            .apply(&mut context)
             .unwrap_or(STONE);
         self.columns.insert(key, column);
         result
@@ -186,32 +198,31 @@ impl Cache {
         sampler: &mut TerrainSampler<'_>,
         p: [f64; 3],
     ) -> u8 {
-        if self.biomes.len() >= 4096 {
-            self.biomes.clear();
-        }
         let key = [(p[0] / 4.0).floor() as i32, (p[2] / 4.0).floor() as i32];
         let qy = ((p[1] + 64.0) / 4.0).floor().clamp(0.0, 95.0) as usize;
-        let col = self.biomes.entry(key).or_insert_with(|| {
+        let mut col = self.biomes.remove(&key).unwrap_or_else(|| {
             let p = [f64::from(key[0] * 4 + 2), 63.0, f64::from(key[1] * 4 + 2)];
             BiomeColumn {
                 candidate: surface.biomes.column(sampler.climate(p)),
                 values: [None; 96],
             }
         });
-        *col.values[qy].get_or_insert_with(|| {
+        let result = *col.values[qy].get_or_insert_with(|| {
             let p = [
                 f64::from(key[0] * 4 + 2),
                 -64.0 + qy as f64 * 4.0 + 2.0,
                 f64::from(key[1] * 4 + 2),
             ];
             surface.biomes.sample(col.candidate, sampler.depth(p))
-        })
+        });
+        self.biomes.insert(key, col);
+        result
     }
     pub(in crate::worldgen) fn height(&mut self, sampler: &mut TerrainSampler<'_>, key: Xz) -> f64 {
-        if self.heights.len() >= 65536 {
-            self.heights.clear();
+        if let Some(value) = self.heights.get(&key) {
+            return *value;
         }
-        *self.heights.entry(key).or_insert_with(|| {
+        let result = (|| {
             // Keep the source estimate's one-metre vertical lattice. Fine X/Z
             // coordinates still sample continuously through the 3D density.
             let mut above = sampler.density_fast(point(key, 319 * 16));
@@ -238,7 +249,9 @@ impl Cache {
                 }
             }
             63.0
-        })
+        })();
+        self.heights.insert(key, result);
+        result
     }
 }
 struct Context<'a, 'g> {
@@ -415,3 +428,82 @@ fn water_top(sampler: &mut TerrainSampler<'_>, key: Xz, mut y: i32) -> Option<f6
     }
     height
 }
+
+/// Descending contiguous stone spans share column context. Split only where a
+/// condition can change; uncertain gradients and clay bands retain literal evaluation.
+fn paint_span(
+    rule: &crate::worldgen::surface_rules::Rule,
+    context: &mut Context<'_, '_>,
+    data: &mut Chunk,
+    [x, z]: [usize; 2],
+    origin: i32,
+    low: i32,
+    high: i32,
+) {
+    context.p[1] = (origin + high) as f64 / 16.;
+    let uniform = rule.uniform_span(context, (origin + low) as f64 / 16.);
+    if let Some(material) = uniform {
+        if let Some(m) = material.filter(|&m| m != STONE) {
+            for y in low..=high {
+                data.set(x + 32 * (z + 32 * y as usize), m);
+            }
+        }
+    } else if low == high {
+        if let Some(m) = rule.apply(context).filter(|&m| m != STONE) {
+            data.set(x + 32 * (z + 32 * low as usize), m);
+        }
+    } else {
+        let mid = (low + high) / 2;
+        paint_span(rule, context, data, [x, z], origin, mid + 1, high);
+        paint_span(rule, context, data, [x, z], origin, low, mid);
+    }
+}
+
+#[cfg(test)]
+impl Cache {
+    fn decorate_literal(
+        &mut self,
+        surface: &Surface,
+        sampler: &mut TerrainSampler<'_>,
+        origin: [i32; 3],
+        data: &mut Chunk,
+    ) {
+        for z in 0..32 {
+            for x in 0..32 {
+                if !(0..32).any(|y| data.get(x + 32 * (z + 32 * y)) == STONE) {
+                    continue;
+                }
+                let key = [origin[0] + x as i32, origin[2] + z as i32];
+                let mut column = self.column(surface, key);
+                {
+                    let mut context = Context {
+                        surface,
+                        sampler,
+                        cache: self,
+                        column: &mut column,
+                        p: point(key, origin[1]),
+                        biome: None,
+                    };
+                    for y in (0..32).rev() {
+                        let index = x + 32 * (z + 32 * y);
+                        if data.get(index) != STONE {
+                            continue;
+                        }
+                        context.p[1] = (origin[1] + y as i32) as f64 / 16.0;
+                        if let Some(material) = surface.rules.apply(&mut context) {
+                            if material != STONE {
+                                data.set(index, material);
+                            }
+                        }
+                    }
+                }
+                self.columns.insert(key, column);
+            }
+        }
+        data.compact();
+    }
+}
+
+#[cfg(test)]
+#[path = "surface_page_tests.rs"]
+mod page_tests;

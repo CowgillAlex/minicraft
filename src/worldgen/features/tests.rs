@@ -268,3 +268,46 @@ fn procedural_sky_filters_leaves_and_glass_but_lamps_still_occlude_it() {
     assert_eq!(values[20], 244);
     assert_eq!(values[19], 0);
 }
+
+#[test]
+fn optical_queries_match_rasterized_features_without_ore_identity() {
+    for (seed, p) in [
+        (1794358123416304200, [272., 73., -140.]),
+        (8349847389, [84., 64., 28.]),
+        (1, [-8., -32., -8.]),
+    ] {
+        let g = crate::worldgen::Generator::new(seed).unwrap();
+        let mut a = g.sampler();
+        let mut b = g.sampler();
+        let key = p.map(|v: f64| (v * 16.).floor() as i32 / 32);
+        for offset in [[0, 0, 0], [0, 1, 0], [1, 0, 0], [0, -1, 0]] {
+            let origin: [i32; 3] = std::array::from_fn(|i| (key[i] + offset[i]) * 32);
+            let proof = a.world_uniform(
+                origin.map(|v| v as f64 / 16.),
+                origin.map(|v| (v + 31) as f64 / 16.),
+                true,
+                true,
+            );
+            for n in (0..32768).step_by(17) {
+                let cell = [
+                    origin[0] + (n % 32),
+                    origin[1] + n / 1024,
+                    origin[2] + (n / 32) % 32,
+                ];
+                let point = cell.map(|v| v as f64 / 16.);
+                if let Some(material) = proof {
+                    let actual = b.world_material(point, true, true);
+                    assert_eq!(
+                        (crate::light_field::loss(material), material == LIGHT),
+                        (crate::light_field::loss(actual), actual == LIGHT)
+                    );
+                }
+                assert_eq!(
+                    crate::light_field::loss(a.world_optical_material(point, true, true)),
+                    crate::light_field::loss(b.world_material(point, true, true)),
+                    "seed {seed} at {cell:?}"
+                );
+            }
+        }
+    }
+}

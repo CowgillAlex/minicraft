@@ -15,6 +15,7 @@ mod column;
 pub use column::Cache;
 pub struct Surface {
     pub(super) rules: Rule,
+    pub(super) by_biome: Vec<Rule>,
     pub(super) biomes: Arc<Table>,
     pub(super) noises: Vec<Normal>,
     pub(super) seed: i64,
@@ -37,8 +38,20 @@ impl Surface {
         }
         let rules = Rule::parse(&data["surface_rule"], &biomes, &indices)?;
         let transparent = rules.transparent_biomes();
+        let by_biome = (0..biomes.len())
+            .map(|id| {
+                let name = biomes.name(id as u8);
+                rules
+                    .specialize(
+                        id as u8,
+                        name.contains("snowy") || name.contains("frozen") || name.contains("ice"),
+                    )
+                    .unwrap_or(Rule::Sequence(Vec::new()))
+            })
+            .collect();
         Ok(Self {
             rules,
+            by_biome,
             biomes,
             noises,
             seed,

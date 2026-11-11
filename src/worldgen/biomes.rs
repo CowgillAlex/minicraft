@@ -8,11 +8,14 @@ struct Entry {
     ranges: [[f64; 2]; 6],
     biome: Id,
 }
+#[path = "biome_index.rs"]
+mod index;
 pub struct Table {
+    index: [index::Node; 4],
     entries: Vec<Entry>,
     names: Vec<String>,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Column {
     candidates: [Option<(usize, f64)>; 4],
 }
@@ -43,7 +46,7 @@ impl Table {
         if names.len() > u8::MAX as usize {
             return Err("Too many biomes".into());
         }
-        let entries = rows
+        let entries: Vec<Entry> = rows
             .iter()
             .map(|r| Entry {
                 ranges: std::array::from_fn(|a| {
@@ -54,7 +57,22 @@ impl Table {
                     .unwrap() as Id,
             })
             .collect();
-        Ok(Arc::new(Self { entries, names }))
+        let index = std::array::from_fn(|band| {
+            index::Node::build(
+                &entries,
+                (0..entries.len())
+                    .filter(|&i| entries[i].band() == band)
+                    .collect(),
+            )
+        });
+        Ok(Arc::new(Self {
+            entries,
+            names,
+            index,
+        }))
+    }
+    pub fn len(&self) -> usize {
+        self.names.len()
     }
     pub fn id(&self, name: &str) -> Result<Id, String> {
         self.names
@@ -66,22 +84,8 @@ impl Table {
         &self.names[id as usize]
     }
     pub fn column(&self, climate: [f64; 6]) -> Column {
-        let mut candidates: [Option<(usize, f64)>; 4] = [None; 4];
-        for (index, entry) in self.entries.iter().enumerate() {
-            let band = match entry.ranges[4][0] {
-                0.0 => 0,
-                1.0 => 1,
-                1.1 => 3,
-                _ => 2,
-            };
-            let score = [0, 1, 2, 3, 5]
-                .into_iter()
-                .map(|a| distance(entry.ranges[a], climate[a]).powi(2))
-                .sum();
-            if candidates[band].is_none_or(|(_, best)| score < best) {
-                candidates[band] = Some((index, score));
-            }
-        }
+        let candidates =
+            std::array::from_fn(|band| self.index[band].nearest(&self.entries, climate));
         Column { candidates }
     }
     pub fn sample(&self, column: Column, depth: f64) -> Id {
@@ -96,5 +100,16 @@ impl Table {
             }
         }
         biome
+    }
+}
+
+impl Entry {
+    fn band(&self) -> usize {
+        match self.ranges[4][0] {
+            0.0 => 0,
+            1.0 => 1,
+            1.1 => 3,
+            _ => 2,
+        }
     }
 }

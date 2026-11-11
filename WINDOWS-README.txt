@@ -1,7 +1,7 @@
-MINICRAFT v0.15.0
+MINICRAFT v0.16.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.15.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.16.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -14,6 +14,16 @@ as you move, together with new terrain and lighting. Only the spawn area
 and its small meshing border are prepared before play. Sampling runs on a
 bounded worker pool, prioritizing the view and travel direction.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
+
+STREAMING IN v0.16.0
+Lighting tests exact feature shapes without rasterizing full pages or generating
+ore deposits. Uniform base and resident pages reuse their optical response.
+Workers share feature plans, caches evict old work incrementally, and surface
+rules resolve constant stone spans together. Biome selection uses an exact
+range index; the existing four-metre biome sampling grid is unchanged.
+Page meshes prepare in parallel. A bounded 64 MiB cache reuses exact source
+geometry when changing LOD, with affected pages invalidated after edits.
+Geometry, AO, transparency and the conservative distant simplifier are unchanged.
 
 UI
 A compact bottom hotbar shows block previews and the selected material.

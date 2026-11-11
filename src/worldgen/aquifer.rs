@@ -1,6 +1,5 @@
 use super::{density::Sampler, random::Random};
 use crate::world::{AIR, STONE, VOXEL, WATER};
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Fluid {
@@ -28,9 +27,9 @@ struct Candidate {
 /// Keeps Paper-Minecraft's fluid rules and empty lava band; terrain density is unchanged.
 pub struct Aquifer {
     random: Random,
-    locations: HashMap<[i32; 3], [i32; 3]>,
-    statuses: HashMap<[i32; 3], Fluid>,
-    surfaces: HashMap<[i32; 2], i32>,
+    locations: crate::cache::Cache<[i32; 3], [i32; 3], 65536>,
+    statuses: crate::cache::Cache<[i32; 3], Fluid, 65536>,
+    surfaces: crate::cache::Cache<[i32; 2], i32, 65536>,
     anchor: Option<[i32; 3]>,
     neighbors: [Candidate; 12],
 }
@@ -82,9 +81,9 @@ impl Aquifer {
     pub fn new(seed: i64) -> Self {
         Self {
             random: Random::new(seed).named("minecraft:aquifer"),
-            locations: HashMap::new(),
-            statuses: HashMap::new(),
-            surfaces: HashMap::new(),
+            locations: Default::default(),
+            statuses: Default::default(),
+            surfaces: Default::default(),
             anchor: None,
             neighbors: [Candidate::default(); 12],
         }
@@ -164,7 +163,10 @@ impl Aquifer {
     }
 
     fn location(&mut self, key: [i32; 3]) -> [i32; 3] {
-        *self.locations.entry(key).or_insert_with(|| {
+        if let Some(value) = self.locations.get(&key) {
+            return *value;
+        }
+        let value = {
             let mut random = self
                 .random
                 .named(&format!("cell/{}/{}/{}", key[0], key[1], key[2]));
@@ -173,20 +175,13 @@ impl Aquifer {
                 key[1] * 12 + random.int(9) as i32,
                 key[2] * 16 + random.int(10) as i32,
             ]
-        })
+        };
+        self.locations.insert(key, value);
+        value
     }
 
     // Cache only the current 12 candidates locally; repeated fine samples use no map lookups.
     fn prepare_neighbors(&mut self, anchor: [i32; 3]) {
-        if self.locations.len() > 65536
-            || self.statuses.len() > 65536
-            || self.surfaces.len() > 65536
-        {
-            self.locations.clear();
-            self.statuses.clear();
-            self.surfaces.clear();
-            self.anchor = None;
-        }
         if self.anchor == Some(anchor) {
             return;
         }

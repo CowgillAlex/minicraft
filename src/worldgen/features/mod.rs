@@ -7,7 +7,10 @@ mod ores;
 mod placement;
 mod plants;
 use placement::{cave_area, surface_area};
+mod optics;
 mod query;
+mod shared;
+pub(crate) use shared::Shared;
 pub mod showcase;
 mod structures;
 #[cfg(test)]
@@ -18,7 +21,7 @@ use crate::{chunk::Chunk, materials::*};
 use ecology::Habitat;
 use geometry::{Primitive, Replace};
 use glam::DVec3 as V;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 pub struct Rng(Random);
 impl Rng {
@@ -38,14 +41,18 @@ impl Rng {
         self.0.int(n as u32)
     }
 }
+type OpticalKey = ([i32; 3], bool);
 #[derive(Default)]
 pub struct Cache {
-    areas: HashMap<[i32; 2], Arc<Vec<Primitive>>>,
-    cave: HashMap<[i32; 3], Arc<Vec<Primitive>>>,
-    ores: HashMap<[i32; 3], Arc<Vec<Primitive>>>,
-    optical_blocks: HashMap<[i32; 3], Arc<Vec<Primitive>>>,
-    blocks: HashMap<[i32; 3], Arc<Vec<Primitive>>>,
-    pages: HashMap<[i32; 3], Arc<Overlay>>,
+    pub(crate) shared: Option<Arc<Shared>>,
+    areas: crate::cache::Cache<[i32; 2], Arc<Vec<Primitive>>, 128>,
+    cave: crate::cache::Cache<[i32; 3], Arc<Vec<Primitive>>, 1024>,
+    ores: crate::cache::Cache<[i32; 3], Arc<Vec<Primitive>>, 512>,
+    optical_blocks: crate::cache::Cache<[i32; 3], Arc<Vec<Primitive>>, 2048>,
+    blocks: crate::cache::Cache<[i32; 3], Arc<Vec<Primitive>>, 2048>,
+    pages: crate::cache::Cache<[i32; 3], Arc<Overlay>, 512>,
+    optics: crate::cache::Cache<OpticalKey, Arc<optics::Page>, 2048>,
+    optical_last: Option<(OpticalKey, Arc<optics::Page>)>,
     last: Option<([i32; 3], Arc<Overlay>)>,
 }
 pub struct Overlay {
@@ -62,6 +69,7 @@ impl Overlay {
         }
         data.compact();
     }
+    #[cfg(test)]
     pub fn at(&self, index: usize, base: u8) -> u8 {
         self.cells
             .binary_search_by_key(&(index as u16), |v| v.0)
@@ -69,6 +77,12 @@ impl Overlay {
     }
 }
 impl Cache {
+    pub(crate) fn new(shared: Arc<Shared>) -> Self {
+        Self {
+            shared: Some(shared),
+            ..Default::default()
+        }
+    }
     pub fn page(&mut self, sampler: &mut TerrainSampler<'_>, key: [i32; 3]) -> Arc<Overlay> {
         if let Some((k, p)) = &self.last {
             if *k == key {
@@ -79,9 +93,6 @@ impl Cache {
             let p = p.clone();
             self.last = Some((key, p.clone()));
             return p;
-        }
-        if self.pages.len() >= 512 {
-            self.pages.clear();
         }
         let origin = key.map(|v| v * 32);
         let recipes = self.block(sampler, key.map(|v| v.div_euclid(4)), false);
@@ -115,9 +126,6 @@ impl Cache {
         if let Some(p) = self.blocks.get(&key) {
             return p.clone();
         }
-        if self.blocks.len() >= 2048 {
-            self.blocks.clear();
-        }
         let seed = sampler.seed;
         let min = key.map(|v| v as f64 * 8.);
         let max = min.map(|v| v + 8.);
@@ -129,10 +137,10 @@ impl Cache {
                 let recipes = if let Some(p) = self.areas.get(&k) {
                     p.clone()
                 } else {
-                    if self.areas.len() >= 128 {
-                        self.areas.clear();
-                    }
-                    let p = Arc::new(surface_area(sampler, k));
+                    let p = self
+                        .shared
+                        .get_or_insert_with(Default::default)
+                        .area(sampler, k);
                     self.areas.insert(k, p.clone());
                     p
                 };
@@ -151,10 +159,10 @@ impl Cache {
                     let recipes = if let Some(p) = self.ores.get(&k) {
                         p.clone()
                     } else {
-                        if self.ores.len() >= 512 {
-                            self.ores.clear();
-                        }
-                        let p = Arc::new(ores::column(sampler, k, seed));
+                        let p = self
+                            .shared
+                            .get_or_insert_with(Default::default)
+                            .ore(sampler, k, seed);
                         self.ores.insert(k, p.clone());
                         p
                     };
@@ -174,10 +182,10 @@ impl Cache {
                         let recipes = if let Some(p) = self.cave.get(&k) {
                             p.clone()
                         } else {
-                            if self.cave.len() >= 1024 {
-                                self.cave.clear();
-                            }
-                            let p = Arc::new(cave_area(sampler, k));
+                            let p = self
+                                .shared
+                                .get_or_insert_with(Default::default)
+                                .cave(sampler, k);
                             self.cave.insert(k, p.clone());
                             p
                         };
@@ -193,9 +201,6 @@ impl Cache {
 
         let result = Arc::new(selected);
         if optical {
-            if self.optical_blocks.len() >= 2048 {
-                self.optical_blocks.clear();
-            }
             self.optical_blocks.insert(key, result.clone());
         } else {
             self.blocks.insert(key, result.clone());
@@ -248,17 +253,21 @@ impl Cache {
         sampler: &mut TerrainSampler<'_>,
         min: [f64; 3],
         max: [f64; 3],
+        base: u8,
     ) -> bool {
         let lo = min.map(|v| (v / 8.).floor() as i32);
         let hi = max.map(|v| (v / 8.).floor() as i32);
         for y in lo[1]..=hi[1] {
             for z in lo[2]..=hi[2] {
                 for x in lo[0]..=hi[0] {
-                    if self
-                        .block(sampler, [x, y, z], true)
-                        .iter()
-                        .any(|p| !matches!(p.replace, Replace::Rock) && intersects(p, min, max))
-                    {
+                    if self.block(sampler, [x, y, z], true).iter().any(|p| {
+                        let paint = u16::from(p.material) | (u16::from(p.replace as u8) << 8);
+                        let material = geometry::apply(paint, base);
+                        (crate::materials::light_loss(material)
+                            != crate::materials::light_loss(base)
+                            || (material == LIGHT) != (base == LIGHT))
+                            && intersects(p, min, max)
+                    }) {
                         return true;
                     }
                 }

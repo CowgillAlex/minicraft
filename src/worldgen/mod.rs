@@ -21,6 +21,7 @@ use aquifer::Aquifer;
 use density::{Density, Sampler};
 
 pub struct Generator {
+    pub(crate) feature_plans: std::sync::Arc<features::Shared>,
     density: Density,
     seed: i64,
     plan: Option<fast_density::Plan>,
@@ -34,7 +35,7 @@ pub struct TerrainSampler<'a> {
     aquifer: Aquifer,
     plan: Option<fast_density::Plan>,
     prepared_cells: [Option<([i32; 3], fast_density::Prepared)>; 16],
-    uniform_cells: std::collections::HashMap<[i32; 3], Option<u8>>,
+    uniform_cells: crate::cache::Cache<[i32; 3], Option<u8>, 16384>,
     surface: &'a surface::Surface,
     surface_cache: surface::Cache,
 }
@@ -44,6 +45,7 @@ impl Generator {
         let density = Density::new(seed)?;
         let plan = fast_density::Plan::compile(&density);
         Ok(Self {
+            feature_plans: Default::default(),
             density,
             seed,
             plan,
@@ -54,7 +56,7 @@ impl Generator {
     pub fn sampler(&self) -> TerrainSampler<'_> {
         TerrainSampler {
             seed: self.seed,
-            features: Default::default(),
+            features: features::Cache::new(self.feature_plans.clone()),
             density: Sampler::new(&self.density),
             aquifer: Aquifer::new(self.seed),
             plan: self.plan,
@@ -67,6 +69,9 @@ impl Generator {
 }
 
 impl TerrainSampler<'_> {
+    pub fn feature_plans(&self) -> std::sync::Arc<features::Shared> {
+        self.features.shared.as_ref().unwrap().clone()
+    }
     pub fn density(&mut self, point: [f64; 3]) -> f64 {
         self.density.root(0, point)
     }
@@ -147,9 +152,6 @@ impl TerrainSampler<'_> {
                 *value
             } else {
                 let value = self.uniform_raw(lo, hi);
-                if self.uniform_cells.len() >= 16384 {
-                    self.uniform_cells.clear();
-                }
                 self.uniform_cells.insert(key, value);
                 value
             };

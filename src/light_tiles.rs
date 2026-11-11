@@ -5,12 +5,12 @@ use crate::{
     world::{self, World},
     worldgen::{sky::Sky, TerrainSampler},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 type Key = [i32; 3];
 const COUNT: usize = 8 * 8 * 8 * 3;
 #[derive(Default)]
 pub struct Tiles {
-    entries: HashMap<Key, Arc<[u8; COUNT]>>,
+    entries: crate::cache::Cache<Key, Arc<[u8; COUNT]>, 16384>,
 }
 impl Tiles {
     pub fn invalidate(&mut self, cells: &[Key]) {
@@ -62,9 +62,6 @@ impl<'a, 'b, 'g> Source<'a, 'b, 'g> {
         self
     }
     fn tile(&mut self, key: Key) -> Arc<[u8; COUNT]> {
-        if self.tiles.entries.len() >= 16384 {
-            self.tiles.entries.clear();
-        }
         let tile = if let Some(tile) = self.tiles.entries.get(&key) {
             tile.clone()
         } else {
@@ -117,9 +114,6 @@ impl LightSource for Source<'_, '_, '_> {
                     }
                 }
             }
-            if self.tiles.entries.len() + keys.len() > 16384 {
-                self.tiles.entries.clear();
-            }
             for (key, tile) in pool.tiles(self.world, keys, self.cancel) {
                 self.tiles.entries.insert(key, tile);
             }
@@ -133,7 +127,7 @@ impl LightSource for Source<'_, '_, '_> {
         } else if let Some(m) = self.world.override_at(p) {
             m
         } else {
-            self.sampler.world_material(
+            self.sampler.world_optical_material(
                 self.world.noise_preview.unwrap().point(p),
                 self.world.noise_preview.unwrap().surfaces,
                 self.world.noise_preview.unwrap().features,
@@ -159,6 +153,28 @@ impl LightSource for Source<'_, '_, '_> {
     }
 }
 
+/// Loaded uniform pages already include surface and feature decoration. Avoid
+/// consulting procedural noise again when they prove the entire ray box.
+fn resident_uniform(world: &World, min: Key, max: Key) -> Option<u8> {
+    let lo = min.map(|v| v.div_euclid(32));
+    let hi = max.map(|v| v.div_euclid(32));
+    let mut material = None;
+    for y in lo[1]..=hi[1] {
+        for z in lo[2]..=hi[2] {
+            for x in lo[0]..=hi[0] {
+                let crate::chunk::Chunk::Uniform(m) = world.page([x, y, z])? else {
+                    return None;
+                };
+                if material.is_some_and(|value| value != *m) {
+                    return None;
+                }
+                material = Some(*m);
+            }
+        }
+    }
+    material
+}
+
 pub(crate) fn generate(
     world: &World,
     sampler: &mut TerrainSampler<'_>,
@@ -175,24 +191,28 @@ pub(crate) fn generate(
     let uniform = if !world.contains(min) || !world.contains(max) || world.has_changes(min, max) {
         None
     } else {
-        sampler.world_uniform(
-            preview.point(min),
-            preview.point(max),
-            preview.surfaces,
-            preview.features,
-        )
+        resident_uniform(world, min, max).or_else(|| {
+            sampler.world_uniform(
+                preview.point(min),
+                preview.point(max),
+                preview.surfaces,
+                preview.features,
+            )
+        })
     };
     let core_max = origin.map(|v| v + 30);
     let core =
         if !world.contains(min) || !world.contains(core_max) || world.has_changes(min, core_max) {
             None
         } else {
-            sampler.world_uniform(
-                preview.point(min),
-                preview.point(core_max),
-                preview.surfaces,
-                preview.features,
-            )
+            resident_uniform(world, min, core_max).or_else(|| {
+                sampler.world_uniform(
+                    preview.point(min),
+                    preview.point(core_max),
+                    preview.surfaces,
+                    preview.features,
+                )
+            })
         };
     if let Some(material) = uniform {
         edges.fill(light_field::loss(material).saturating_mul(5));
@@ -227,7 +247,7 @@ pub(crate) fn generate(
                                 } else if let Some(m) = world.override_at(p) {
                                     m
                                 } else {
-                                    sampler.world_material(
+                                    sampler.world_optical_material(
                                         preview.point(p),
                                         preview.surfaces,
                                         preview.features,

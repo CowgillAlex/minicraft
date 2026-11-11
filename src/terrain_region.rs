@@ -1,7 +1,6 @@
 use crate::{
     chunk::Chunk,
     light_field::LightField,
-    mesh::Mesh,
     world::World,
     worldgen::{preview::Preview, sky::Sky, Generator, TerrainSampler},
 };
@@ -118,6 +117,9 @@ impl<'a> Builder<'a> {
     }
     pub fn edit(&mut self, snapshot: &World, cells: &[[i32; 3]]) {
         self.world.copy_edits_from(snapshot);
+        if let Some(pool) = &self.pages {
+            pool.invalidate_meshes(cells);
+        }
         self.sky.invalidate(cells);
         self.tiles.invalidate(cells);
         if !cells.is_empty() {
@@ -202,26 +204,34 @@ impl<'a> Builder<'a> {
             if nonempty {
                 self.ensure(key, 1, &cancel, &mut added)?;
             }
-            let mut meshes = Vec::new();
-            let mut bytes = 0;
+            let mut keys = Vec::new();
             for y in 0..4 {
                 for z in 0..4 {
                     for x in 0..4 {
-                        if cancel() {
-                            return None;
-                        }
                         let page = [key[0] * 4 + x, key[1] * 4 + y, key[2] * 4 + z];
-                        if page[1] * 32 >= self.world.height() {
-                            continue;
-                        }
-                        let mesh = Mesh::build_chunk(&self.world, page);
-                        let mesh = crate::terrain_lod::reduce(mesh, page, level);
-                        bytes += mesh.bytes();
-                        if !mesh.vertices.is_empty() {
-                            meshes.push((page, Arc::new(mesh)));
+                        if page[1] * 32 < self.world.height() && self.world.has_geometry(page) {
+                            keys.push(page);
                         }
                     }
                 }
+            }
+            let pool = self.pages.get_or_insert_with(|| {
+                crate::terrain_pages::Pages::new(
+                    self.world.noise_preview.unwrap(),
+                    self.sampler.feature_plans(),
+                )
+            });
+            let mut bytes = 0;
+            let meshes: Vec<_> = pool
+                .meshes(&self.world, keys, level, &cancel)
+                .into_iter()
+                .filter_map(|(page, mesh)| {
+                    bytes += mesh.bytes();
+                    (!mesh.vertices.is_empty()).then_some((page, mesh))
+                })
+                .collect();
+            if cancel() {
+                return None;
             }
 
             let cpu = meshes
@@ -271,7 +281,10 @@ impl<'a> Builder<'a> {
         } else {
             phases[2] = started.elapsed().as_secs_f64() - phases[0] - phases[1];
             self.pages.get_or_insert_with(|| {
-                crate::terrain_pages::Pages::new(self.world.noise_preview.unwrap())
+                crate::terrain_pages::Pages::new(
+                    self.world.noise_preview.unwrap(),
+                    self.sampler.feature_plans(),
+                )
             });
             let low = origin.map(|v| v - 128);
             let mut field = LightField::build_sampled(
@@ -379,9 +392,9 @@ impl<'a> Builder<'a> {
             }
         }
         if !missing.is_empty() {
-            let pool = self
-                .pages
-                .get_or_insert_with(|| crate::terrain_pages::Pages::new(preview));
+            let pool = self.pages.get_or_insert_with(|| {
+                crate::terrain_pages::Pages::new(preview, self.sampler.feature_plans())
+            });
             for (key, data) in pool.generate(missing, cancel) {
                 self.world.insert_page(key, data);
             }
@@ -430,9 +443,9 @@ impl<'a> Builder<'a> {
         }
         let preview = self.world.noise_preview.unwrap();
         if !missing.is_empty() {
-            let pool = self
-                .pages
-                .get_or_insert_with(|| crate::terrain_pages::Pages::new(preview));
+            let pool = self.pages.get_or_insert_with(|| {
+                crate::terrain_pages::Pages::new(preview, self.sampler.feature_plans())
+            });
             for (key, data) in pool.generate(missing, cancel) {
                 self.world.insert_page(key, data);
             }
