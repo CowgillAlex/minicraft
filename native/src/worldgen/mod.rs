@@ -5,6 +5,7 @@ pub use biome_probe::BiomeProbe;
 mod config;
 mod density;
 mod fast_density;
+pub(crate) mod features;
 mod noise;
 pub(crate) mod page;
 mod preliminary;
@@ -27,6 +28,8 @@ pub struct Generator {
 }
 
 pub struct TerrainSampler<'a> {
+    seed: i64,
+    features: features::Cache,
     density: Sampler<'a>,
     aquifer: Aquifer,
     plan: Option<fast_density::Plan>,
@@ -50,6 +53,8 @@ impl Generator {
 
     pub fn sampler(&self) -> TerrainSampler<'_> {
         TerrainSampler {
+            seed: self.seed,
+            features: Default::default(),
             density: Sampler::new(&self.density),
             aquifer: Aquifer::new(self.seed),
             plan: self.plan,

@@ -48,6 +48,10 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     let captured =
         match ui.unwrap_or("play") {
             "play" => true,
+            "clean" => {
+                renderer.hud_enabled = false;
+                false
+            }
             "debug" => {
                 renderer.ui.debug = true;
                 true
@@ -62,7 +66,7 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
                 false
             }
             "materials" => {
-                renderer.ui.panel = crate::ui::Panel::Materials;
+                renderer.ui.panel = crate::ui::Panel::Materials(0);
                 false
             }
             "settings" => {
@@ -107,6 +111,15 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         .map(crate::capture_views::shadow_view)
         .transpose()?
         .unwrap_or_default();
+    if matches!(shadow_view, Some("world-surface" | "world-underwater")) {
+        camera = crate::capture_views::procedural(
+            renderer
+                .world()
+                .noise_preview
+                .ok_or("world view needs procedural terrain")?,
+            shadow_view == Some("world-underwater"),
+        )?;
+    }
     if shadow_view.is_none() {
         if let Some(preview) = renderer.world().noise_preview {
             if preview.height_m > 12 {

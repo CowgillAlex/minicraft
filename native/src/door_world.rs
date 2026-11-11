@@ -64,6 +64,23 @@ impl World {
         self.doors.push(door);
         cells
     }
+    /// Claim a generated panel on first use, once its surrounding pages exist.
+    pub fn recognize_generated_door(&mut self, hit: [i32; 3]) -> Option<Vec<[i32; 3]>> {
+        let handles: Vec<_> = self
+            .loose_handles
+            .iter()
+            .copied()
+            .filter(|p| (0..3).all(|i| (p[i] - hit[i]).abs() <= 32))
+            .collect();
+        for handle in handles {
+            if let Some(door) = crate::doors::recognition::recognize(self, handle) {
+                if door.local_cell(hit).is_some() {
+                    return Some(self.install_door(door));
+                }
+            }
+        }
+        None
+    }
     pub fn edit(&mut self, cell: [i32; 3], material: u8) -> Option<Edit> {
         if !self.contains(cell) || self.get(cell[0], cell[1], cell[2]) == material {
             return None;

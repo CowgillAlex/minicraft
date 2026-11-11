@@ -64,7 +64,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 hud.text(description, p.x + 224.0, y, 14.0, TEXT);
             }
         }
-        Panel::Materials => {
+        Panel::Materials(_) => {
             hud.styled_text("Materials", p.x + 26.0, p.y + 24.0, 24.0, TEXT, true);
             hud.text(
                 "Choose a material. Tab returns to the world.",

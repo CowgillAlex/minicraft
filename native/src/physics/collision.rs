@@ -10,7 +10,7 @@ pub struct Motion {
     pub grounded: bool,
 }
 fn solid(material: u8) -> bool {
-    !matches!(material, world::AIR | world::WATER | world::FLOWER)
+    crate::materials::collides(material)
 }
 /// Gather only fine voxels within the swept body and optional step-up region.
 fn obstacles(world: &World, body: Aabb, movement: Vec3, stepping: bool) -> Vec<Aabb> {

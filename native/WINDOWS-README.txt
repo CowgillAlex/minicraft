@@ -1,7 +1,7 @@
-MINICRAFT v0.14.1
+MINICRAFT v0.15.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.14.1-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.15.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -17,7 +17,7 @@ Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
 UI
 A compact bottom hotbar shows block previews and the selected material.
-Tab opens a dark picker for all 39 materials. Click to select and return
+Tab opens a dark picker for all 78 materials. Click to select and return
 to the world, or press Tab again to close it.
 Esc opens the clickable world menu. Settings control AO, VSync, voxel
 outlines, and time of day. Use local time follows the computer clock in
@@ -173,7 +173,19 @@ badlands terracotta bands, mountain snow/ice/calcite, mud, podzol, mycelium,
 sulfur/cinnabar, and bedrock/deepslate transitions. Layer depths retain metre
 scale; a one-metre layer is 16 tiny voxels deep. Surface decoration runs on
 the terrain workers and does not require loaded neighboring pages.
-There are no generated ores, buildings, trees or other features yet.
+All 56 biomes now have a decoration profile: branching trees and leaf sprays,
+seeded grass, flowers with separate parts, wheat/grains, bamboo, cacti, fungi,
+alpine/cave growth, river plants, kelp, seagrass and warm-ocean coral.
+Occasional cottages fit gentle dry sites, with warm lamps and editable doors.
+Press E on a generated door to recognize it and open it. Soft plant parts are
+walkable and filter skylight. All parts can be broken/placed as fine voxels.
+Coal, iron, copper, gold, redstone, lapis, diamond and emerald appear as little
+inclusions within stone/deepslate. Placement counts, height distributions,
+biome restrictions and exposure reduction come from the source ore settings.
+Plants generate mature. Growth, inventories and animals are not simulated.
+--no-features disables decoration/ores while retaining biome surfaces.
+--showcase BIOME opens a controlled preview of a biome's feature recipes.
+--showcase tree / plants / cabin / ores opens a focused reference plot.
 All materials are selectable with Tab, middle-click or #. Ice and powder snow
 currently behave as opaque solid blocks.
 Walking has gravity, jumping, wall sliding and half-metre step-up. Both

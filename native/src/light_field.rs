@@ -74,12 +74,7 @@ impl Grid {
     }
 }
 pub(crate) fn loss(material: u8) -> u8 {
-    match material {
-        world::AIR | world::LIGHT => 0,
-        world::GLASS => 3,
-        world::WATER => 1,
-        _ => BLOCKED,
-    }
+    crate::materials::light_loss(material)
 }
 #[cfg(test)]
 pub fn segment_loss(world: &World, from: Vec3, to: Vec3) -> u8 {
@@ -180,6 +175,9 @@ fn emitter_seeds_read(
     }
 }
 pub trait LightSource {
+    fn emitters(&mut self, _origin: [i32; 3], _size: [usize; 3]) -> Vec<[i32; 3]> {
+        Vec::new()
+    }
     fn prepare_sky(&mut self, _origin: [i32; 3], _size: [usize; 3]) {}
     fn prepare_edges(&mut self, _origin: [i32; 3], _size: [usize; 3]) {}
     fn cancelled(&self) -> bool;
@@ -347,7 +345,11 @@ impl LightField {
                 }
             }
         }
-        for &cell in &world.emitters {
+        let mut emitters: Vec<_> = world.emitters.iter().copied().collect();
+        emitters.extend(source.emitters(origin, size));
+        emitters.sort_unstable();
+        emitters.dedup();
+        for cell in emitters {
             emitter_seeds_read(
                 grid,
                 cell,

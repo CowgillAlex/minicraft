@@ -119,6 +119,117 @@ materials![
     ),
     (38, SULFUR, "Sulfur", "sulfur", [0.86, 0.79, 0.19]),
     (39, CINNABAR, "Cinnabar", "cinnabar", [0.66, 0.18, 0.14]),
+    (40, STEM, "Stem", "stem", [0.24, 0.42, 0.12]),
+    (
+        41,
+        GRASS_BLADE,
+        "Grass blade",
+        "grass_blade",
+        [0.34, 0.55, 0.16]
+    ),
+    (42, SEED, "Grass seed", "seed", [0.65, 0.49, 0.19]),
+    (
+        43,
+        PETAL_WHITE,
+        "White petal",
+        "petal_white",
+        [0.94, 0.91, 0.79]
+    ),
+    (44, PETAL_RED, "Red petal", "petal_red", [0.82, 0.16, 0.18]),
+    (
+        45,
+        PETAL_BLUE,
+        "Blue petal",
+        "petal_blue",
+        [0.3, 0.42, 0.83]
+    ),
+    (
+        46,
+        PETAL_PINK,
+        "Pink petal",
+        "petal_pink",
+        [0.92, 0.47, 0.65]
+    ),
+    (47, POLLEN, "Pollen", "pollen", [0.98, 0.73, 0.18]),
+    (
+        48,
+        WHEAT_STEM,
+        "Wheat stalk",
+        "wheat_stem",
+        [0.66, 0.59, 0.22]
+    ),
+    (49, GRAIN, "Wheat grain", "grain", [0.86, 0.7, 0.35]),
+    (50, BARK, "Bark", "bark", [0.27, 0.17, 0.105]),
+    (
+        51,
+        BIRCH_BARK,
+        "Birch bark",
+        "birch_bark",
+        [0.83, 0.82, 0.7]
+    ),
+    (52, HEARTWOOD, "Heartwood", "heartwood", [0.65, 0.43, 0.23]),
+    (53, NEEDLES, "Needles", "needles", [0.12, 0.29, 0.19]),
+    (
+        54,
+        CHERRY_LEAF,
+        "Cherry blossom",
+        "cherry_leaf",
+        [0.84, 0.47, 0.59]
+    ),
+    (55, PALE_LEAF, "Pale leaves", "pale_leaf", [0.56, 0.64, 0.5]),
+    (56, FERN, "Fern", "fern", [0.2, 0.46, 0.23]),
+    (57, CACTUS, "Cactus", "cactus", [0.23, 0.43, 0.23]),
+    (58, REED, "Reed", "reed", [0.44, 0.5, 0.18]),
+    (59, KELP, "Kelp", "kelp", [0.27, 0.43, 0.12]),
+    (60, SEAGRASS, "Seagrass", "seagrass", [0.21, 0.52, 0.34]),
+    (
+        61,
+        CORAL_PINK,
+        "Pink coral",
+        "coral_pink",
+        [0.91, 0.32, 0.5]
+    ),
+    (
+        62,
+        CORAL_BLUE,
+        "Blue coral",
+        "coral_blue",
+        [0.28, 0.43, 0.78]
+    ),
+    (
+        63,
+        CORAL_GOLD,
+        "Gold coral",
+        "coral_gold",
+        [0.92, 0.65, 0.18]
+    ),
+    (
+        64,
+        MUSHROOM_CAP,
+        "Mushroom cap",
+        "mushroom_cap",
+        [0.73, 0.18, 0.13]
+    ),
+    (
+        65,
+        MUSHROOM_STEM,
+        "Mushroom stem",
+        "mushroom_stem",
+        [0.77, 0.69, 0.48]
+    ),
+    (66, MOSS, "Moss", "moss", [0.32, 0.48, 0.19]),
+    (67, LICHEN, "Lichen", "lichen", [0.59, 0.65, 0.43]),
+    (68, SCULK, "Sculk", "sculk", [0.07, 0.24, 0.26]),
+    (69, CRYSTAL, "Sulfur crystal", "crystal", [0.86, 0.81, 0.27]),
+    (70, COAL, "Coal", "coal", [0.09, 0.11, 0.12]),
+    (71, IRON, "Iron", "iron", [0.66, 0.44, 0.31]),
+    (72, COPPER, "Copper", "copper", [0.74, 0.42, 0.23]),
+    (73, GOLD, "Gold", "gold", [0.95, 0.73, 0.23]),
+    (74, REDSTONE, "Redstone", "redstone", [0.7, 0.08, 0.07]),
+    (75, LAPIS, "Lapis lazuli", "lapis", [0.12, 0.25, 0.68]),
+    (76, DIAMOND, "Diamond", "diamond", [0.35, 0.85, 0.85]),
+    (77, EMERALD, "Emerald", "emerald", [0.15, 0.73, 0.37]),
+    (78, BAMBOO, "Bamboo", "bamboo", [0.41, 0.52, 0.20]),
 ];
 pub fn get(id: u8) -> &'static Material {
     ALL.get(id as usize).unwrap_or(&ALL[0])
@@ -135,5 +246,45 @@ pub fn face_color(material: u8, vertical: f32) -> [f32; 3] {
         get(DIRT).color
     } else {
         get(material).color
+    }
+}
+
+/// Soft plant parts remain editable without obstructing the player.
+pub fn collides(material: u8) -> bool {
+    !matches!(
+        material,
+        AIR | WATER
+            | FLOWER
+            | LEAF
+            | STEM
+            | GRASS_BLADE
+            | SEED
+            | PETAL_WHITE
+            | PETAL_RED
+            | PETAL_BLUE
+            | PETAL_PINK
+            | POLLEN
+            | WHEAT_STEM
+            | GRAIN
+            | NEEDLES
+            | CHERRY_LEAF
+            | PALE_LEAF
+            | FERN
+            | REED
+            | KELP
+            | SEAGRASS
+            | LICHEN
+    )
+}
+/// Lighting transport is independent of collision and mesh face occlusion.
+pub fn light_loss(material: u8) -> u8 {
+    match material {
+        AIR | LIGHT => 0,
+        GLASS => 3,
+        WATER => 1,
+        LEAF | NEEDLES | CHERRY_LEAF | PALE_LEAF => 8,
+        FLOWER | STEM | GRASS_BLADE | SEED | PETAL_WHITE | PETAL_RED | PETAL_BLUE | PETAL_PINK
+        | POLLEN | WHEAT_STEM | GRAIN | FERN | REED | KELP | SEAGRASS | LICHEN => 2,
+        _ => 255,
     }
 }

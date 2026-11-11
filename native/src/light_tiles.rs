@@ -77,6 +77,21 @@ impl<'a, 'b, 'g> Source<'a, 'b, 'g> {
     }
 }
 impl LightSource for Source<'_, '_, '_> {
+    fn emitters(&mut self, origin: Key, size: [usize; 3]) -> Vec<Key> {
+        let preview = self.world.noise_preview.unwrap();
+        if !preview.features {
+            return Vec::new();
+        }
+        let max = std::array::from_fn(|i| origin[i] + size[i] as i32 * 4);
+        let points = self
+            .sampler
+            .feature_emitters(preview.point(origin), preview.point(max));
+        points
+            .into_iter()
+            .map(|p| std::array::from_fn(|i| p[i] - preview.origin[i] * 16))
+            .filter(|&p| self.world.contains(p) && self.material(p) == world::LIGHT)
+            .collect()
+    }
     fn prepare_sky(&mut self, origin: Key, size: [usize; 3]) {
         if let Some(pool) = self.pool {
             let points = self.sky.missing(origin, size);
@@ -118,9 +133,10 @@ impl LightSource for Source<'_, '_, '_> {
         } else if let Some(m) = self.world.override_at(p) {
             m
         } else {
-            self.sampler.light_material(
+            self.sampler.world_material(
                 self.world.noise_preview.unwrap().point(p),
                 self.world.noise_preview.unwrap().surfaces,
+                self.world.noise_preview.unwrap().features,
             )
         }
     }
@@ -159,17 +175,23 @@ pub(crate) fn generate(
     let uniform = if !world.contains(min) || !world.contains(max) || world.has_changes(min, max) {
         None
     } else {
-        sampler.light_uniform(preview.point(min), preview.point(max), preview.surfaces)
+        sampler.world_uniform(
+            preview.point(min),
+            preview.point(max),
+            preview.surfaces,
+            preview.features,
+        )
     };
     let core_max = origin.map(|v| v + 30);
     let core =
         if !world.contains(min) || !world.contains(core_max) || world.has_changes(min, core_max) {
             None
         } else {
-            sampler.light_uniform(
+            sampler.world_uniform(
                 preview.point(min),
                 preview.point(core_max),
                 preview.surfaces,
+                preview.features,
             )
         };
     if let Some(material) = uniform {
@@ -205,7 +227,11 @@ pub(crate) fn generate(
                                 } else if let Some(m) = world.override_at(p) {
                                     m
                                 } else {
-                                    sampler.light_material(preview.point(p), preview.surfaces)
+                                    sampler.world_material(
+                                        preview.point(p),
+                                        preview.surfaces,
+                                        preview.features,
+                                    )
                                 };
                                 values[index] = m;
                                 m

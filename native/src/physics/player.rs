@@ -1,5 +1,5 @@
 use super::{collision, Aabb, TICK_SECONDS};
-use crate::world::{self, World, VOXEL};
+use crate::world::{World, VOXEL};
 use glam::Vec3;
 use std::collections::HashSet;
 use winit::keyboard::KeyCode;
@@ -76,10 +76,7 @@ impl Player {
                 .as_ivec3()
                 .to_array();
             for y in (0..world.height()).rev() {
-                if !matches!(
-                    world.get(x, y, z),
-                    world::AIR | world::WATER | world::FLOWER
-                ) {
+                if crate::materials::collides(world.get(x, y, z)) {
                     player.position.y = (y + 1) as f32 * VOXEL + 0.00002;
                     break;
                 }

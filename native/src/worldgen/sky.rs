@@ -5,17 +5,17 @@ use std::collections::HashMap;
 #[derive(Clone)]
 pub(crate) struct Column {
     blocked: i32,
-    water: Vec<(i32, i32)>,
+    water: Vec<(i32, i32, u8)>,
 }
 impl Column {
-    fn add_water(&mut self, lo: i32, hi: i32) {
+    fn add_filter(&mut self, lo: i32, hi: i32, loss: u8) {
         if let Some(last) = self.water.last_mut() {
-            if last.0 == hi + 1 {
+            if last.0 == hi + 1 && last.2 == loss {
                 last.0 = lo;
                 return;
             }
         }
-        self.water.push((lo, hi));
+        self.water.push((lo, hi, loss));
     }
 
     fn at(&self, y: i32) -> u8 {
@@ -25,7 +25,7 @@ impl Column {
         let water: i32 = self
             .water
             .iter()
-            .map(|&(lo, hi)| (hi - y.max(lo) + 1).clamp(0, hi - lo + 1))
+            .map(|&(lo, hi, loss)| (hi - y.max(lo) + 1).clamp(0, hi - lo + 1) * i32::from(loss))
             .sum();
         255_u8.saturating_sub(water.min(255) as u8)
     }
@@ -97,10 +97,11 @@ pub(crate) fn sample_column(
         let lo = (y + preview.origin[1] * 16).div_euclid(128) * 128 - preview.origin[1] * 16;
         let lo = lo.max(0);
         let uniform = if overrides.range(lo..=y).next().is_none() {
-            sampler.light_uniform(
+            sampler.world_uniform(
                 preview.point([x, lo, z]),
                 preview.point([x, y, z]),
                 preview.surfaces,
+                preview.features,
             )
         } else {
             None
@@ -111,7 +112,7 @@ pub(crate) fn sample_column(
                 continue;
             }
             Some(world::WATER) => {
-                column.add_water(lo, y);
+                column.add_filter(lo, y, 1);
                 water += y - lo + 1;
                 if water >= 255 {
                     column.blocked = lo;
@@ -120,7 +121,9 @@ pub(crate) fn sample_column(
                 y = lo - 1;
                 continue;
             }
-            Some(material) if world::opaque(material) => {
+            Some(material)
+                if crate::light_field::loss(material) == 255 || material == world::LIGHT =>
+            {
                 column.blocked = y;
                 break;
             }
@@ -129,16 +132,21 @@ pub(crate) fn sample_column(
         let mut stop = false;
         for yy in (lo..=y).rev() {
             let material = overrides.get(&yy).copied().unwrap_or_else(|| {
-                sampler.light_material(preview.point([x, yy, z]), preview.surfaces)
+                sampler.world_material(
+                    preview.point([x, yy, z]),
+                    preview.surfaces,
+                    preview.features,
+                )
             });
-            if world::opaque(material) {
+            if crate::light_field::loss(material) == 255 || material == world::LIGHT {
                 column.blocked = yy;
                 stop = true;
                 break;
             }
-            if material == world::WATER {
-                column.add_water(yy, yy);
-                water += 1;
+            let loss = crate::light_field::loss(material);
+            if loss > 0 {
+                column.add_filter(yy, yy, loss);
+                water += i32::from(loss);
             }
             if water >= 255 {
                 column.blocked = yy;
@@ -160,7 +168,11 @@ pub fn surface(preview: Preview, sampler: &mut TerrainSampler<'_>, x: i32, z: i3
         let hi = lo + 31;
         match sampler.uniform_material(preview.point([x, lo, z]), preview.point([x, hi, z])) {
             Some(world::AIR | world::WATER) => continue,
-            Some(material) if world::opaque(material) => return hi + 1,
+            Some(material)
+                if crate::light_field::loss(material) == 255 || material == world::LIGHT =>
+            {
+                return hi + 1
+            }
             _ => {
                 for y in (lo..=hi).rev() {
                     if world::opaque(sampler.material(preview.point([x, y, z]))) {

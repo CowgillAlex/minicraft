@@ -26,6 +26,16 @@ impl Renderer {
         self.sync_doors();
     }
     pub fn interact_door(&mut self, camera: &Camera, player: Aabb, rendered_player: Aabb) -> bool {
+        if let Some(Target::Terrain(hit)) =
+            picking::cast(&self.scene.world, &self.door_meshes, camera)
+        {
+            if let Some(cells) = self.scene.world.recognize_generated_door(hit.cell) {
+                self.sync_doors();
+                self.scene.stream_edits(&cells);
+                self.lighting.request(&self.scene.world, cells);
+                self.shadow_ready = false;
+            }
+        }
         let Some(Target::Door { id, .. }) =
             picking::cast(&self.scene.world, &self.door_meshes, camera)
         else {

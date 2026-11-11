@@ -7,7 +7,7 @@ pub enum Panel {
     Controls,
     Settings,
     View,
-    Materials,
+    Materials(u8),
 }
 #[derive(Default)]
 pub struct UiState {
@@ -38,6 +38,7 @@ pub enum Action {
     Earlier,
     Later,
     Material(u8),
+    MaterialPage(u8),
 }
 #[derive(Clone, Copy)]
 pub struct Rect {
@@ -80,7 +81,7 @@ impl Layout {
             Panel::Controls => (520.0, 516.0),
             Panel::Settings => (440.0, 550.0),
             Panel::View => (480.0, 588.0),
-            Panel::Materials => (680.0, 562.0),
+            Panel::Materials(_) => (680.0, 562.0),
         };
         Rect {
             x: (self.width - w) / 2.0,
@@ -114,11 +115,41 @@ impl Layout {
             }
             Panel::View => return crate::ui_view::buttons(self),
             Panel::Controls => add(448.0, "Back", Action::Back, false),
-            Panel::Materials => {
-                add(494.0, "Back to world", Action::Resume, false);
+            Panel::Materials(page) => {
+                for (x, w, label, action) in [
+                    (
+                        24.,
+                        130.,
+                        "Previous",
+                        Action::MaterialPage(page.saturating_sub(1)),
+                    ),
+                    (164., 320., "Back to world", Action::Resume),
+                    (
+                        494.,
+                        162.,
+                        "Next",
+                        Action::MaterialPage(
+                            (page + 1).min(((crate::materials::ALL.len() - 2) / 42) as u8),
+                        ),
+                    ),
+                ] {
+                    buttons.push(Button {
+                        rect: Rect {
+                            x: p.x + x,
+                            y: p.y + 494.,
+                            w,
+                            h: 44.,
+                        },
+                        label,
+                        action,
+                        primary: false,
+                    });
+                }
                 for (i, m) in crate::materials::ALL
                     .iter()
                     .filter(|m| m.id != crate::world::AIR)
+                    .skip(page as usize * 42)
+                    .take(42)
                     .enumerate()
                 {
                     buttons.push(Button {
@@ -226,7 +257,7 @@ mod tests {
         );
         for size in [(800, 600), (1440, 900), (3840, 2160)] {
             let layout = Layout::new(size);
-            for panel in [Panel::Settings, Panel::View, Panel::Materials] {
+            for panel in [Panel::Settings, Panel::View, Panel::Materials(0)] {
                 let bounds = layout.panel(panel);
                 for button in layout.buttons(panel) {
                     assert!(button.rect.y + button.rect.h <= layout.height);

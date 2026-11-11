@@ -125,6 +125,7 @@ impl App {
             self.scene =
                 crate::worldgen::preview::Scene::Noise(crate::worldgen::preview::Preview {
                     surfaces: true,
+                    features: true,
                     ..Default::default()
                 });
             None

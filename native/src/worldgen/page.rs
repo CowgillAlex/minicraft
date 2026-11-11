@@ -17,6 +17,12 @@ pub fn generate(preview: Preview, sampler: &mut TerrainSampler<'_>, origin: [i32
             &mut generated.data,
         );
     }
+    if preview.features {
+        sampler.decorate_features(
+            std::array::from_fn(|i| origin[i] + preview.origin[i] * 16),
+            &mut generated.data,
+        );
+    }
     generated
 }
 

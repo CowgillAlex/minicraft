@@ -20,6 +20,7 @@ pub struct Preview {
     pub reference: bool,
     pub infinite: bool,
     pub surfaces: bool,
+    pub features: bool,
 }
 
 impl Default for Preview {
@@ -31,6 +32,7 @@ impl Default for Preview {
             reference: false,
             infinite: true,
             surfaces: false,
+            features: false,
         }
     }
 }
@@ -39,6 +41,7 @@ impl Default for Preview {
 pub enum Scene {
     Noise(Preview),
     Village,
+    Showcase(super::features::showcase::Showcase),
 }
 
 impl Scene {
@@ -53,11 +56,19 @@ impl Scene {
                 })
                 .transpose()
         };
+        if let Some(name) = value("--showcase")? {
+            return Ok(Self::Showcase(super::features::showcase::Showcase::parse(
+                name,
+            )?));
+        }
         match value("--scene")?.unwrap_or("noise") {
             "village" => Ok(Self::Village),
             "noise" => {
                 let mut preview = Preview {
                     surfaces: !args.iter().any(|a| a == "--noise-only"),
+                    features: !args
+                        .iter()
+                        .any(|a| matches!(a.as_str(), "--noise-only" | "--no-features")),
                     ..Preview::default()
                 };
                 if let Some(height) = value("--height")? {
@@ -116,6 +127,7 @@ impl Scene {
         match self {
             Self::Noise(preview) => preview.build_with_progress(progress),
             Self::Village => Ok(World::generate()),
+            Self::Showcase(plot) => plot.build(),
         }
     }
 }

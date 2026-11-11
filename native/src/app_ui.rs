@@ -79,6 +79,7 @@ impl App {
                             renderer.ui.panel = Panel::Settings
                         }
                         Action::View => renderer.ui.panel = Panel::View,
+                        Action::MaterialPage(page) => renderer.ui.panel = Panel::Materials(page),
                         Action::ViewChange(change) => renderer.view.change(change),
                         Action::Back => renderer.ui.panel = Panel::Pause,
                         Action::AmbientOcclusion => renderer.ao_enabled = !renderer.ao_enabled,
@@ -100,13 +101,13 @@ impl App {
                     && self
                         .renderer
                         .as_ref()
-                        .is_some_and(|r| r.ui.panel == ui::Panel::Materials)
+                        .is_some_and(|r| matches!(r.ui.panel, ui::Panel::Materials(_)))
                 {
                     self.capture_cursor(true);
                 } else {
                     self.capture_cursor(false);
                     if let Some(r) = &mut self.renderer {
-                        r.ui.panel = ui::Panel::Materials;
+                        r.ui.panel = ui::Panel::Materials(0);
                     }
                 }
             }

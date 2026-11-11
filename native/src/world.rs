@@ -90,6 +90,22 @@ impl World {
                 data.set(i, material);
             }
         }
+        if let crate::chunk::Chunk::Dense { cells, .. } = &data {
+            for (i, &material) in cells.iter().enumerate() {
+                if material == LIGHT || material == HANDLE {
+                    let p = [
+                        key[0] * 32 + (i % 32) as i32,
+                        key[1] * 32 + (i / 1024) as i32,
+                        key[2] * 32 + ((i / 32) % 32) as i32,
+                    ];
+                    if material == LIGHT {
+                        self.emitters.insert(p);
+                    } else {
+                        self.loose_handles.insert(p);
+                    }
+                }
+            }
+        }
         self.voxels -= self.chunks.get(&key).map_or(0, |c| c.occupied());
         let count = data.occupied();
         self.voxels += count;

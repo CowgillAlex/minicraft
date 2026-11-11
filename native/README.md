@@ -1,6 +1,6 @@
 # MiniCraft
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.14.1 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.15.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`. There is no AI or car simulation in this version.
 
 ## System dependencies
 
@@ -22,7 +22,7 @@ cargo run --release --locked
 
 The title screen has a numeric seed field. Leave it blank for a random seed, or enter a signed 64-bit integer. Ctrl+A replaces the current seed; Ctrl+V pastes on Windows. Create world starts generation. An explicit `--seed` pre-fills the field; headless commands retain seed 1 by default. Choose Play or press Enter after loading to capture the mouse. WASD moves, mouse looks, Space jumps, Shift/Q slows walking, Ctrl sprints, and the wheel adjusts speed. F toggles flight; Space flies up and Shift/Q flies down while flying. E opens or closes a targeted door. Esc opens the world menu and releases the cursor. F1 opens Controls, F3 toggles debug info, R returns to a clear spawn position, H hides the playing HUD, G toggles voxel boundaries, O toggles ambient occlusion, -/= move time backward/forward, V toggles VSync, and F11 toggles fullscreen. Walking has gravity. Both walking and flight collide with the fine voxel geometry. F6 toggles night vision, which raises ambient illumination for exploration while preserving material colors, AO and face shading. It does not change game time or bake light. F5 toggles spectator mode, which uses the flight controls but passes through terrain and world bounds without gravity. It remembers the previous walking/flight mode and preserves the visible position when toggled. Returning requires a clear player-sized space inside the world.
 
-After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click or # picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass and N selects a Handle. Tab opens the material picker; choose any of its 39 materials to return to the world with it selected. Tab also closes the picker. A depth-tested mint outline highlights the target within eight metres. Placement cannot overlap the player body at its simulated or interpolated position, or leave world bounds. Edits and doors survive unloading and revisiting an area in RAM. They reset when you create another world or exit; there are no disk saves.
+After capturing the mouse, left-click breaks one voxel, right-click places one voxel against the targeted face, and middle-click or # picks a material. Keys 1-0 select Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, and Lamp. B selects Glass and N selects a Handle. Tab opens the material picker; choose any of its 78 materials to return to the world with it selected. Tab also closes the picker. A depth-tested mint outline highlights the target within eight metres. Placement cannot overlap the player body at its simulated or interpolated position, or leave world bounds. Edits and doors survive unloading and revisiting an area in RAM. They reset when you create another world or exit; there are no disk saves.
 
 The playing HUD contains a compact bottom hotbar with isometric material previews, a crosshair, a small clock, and a selected material label. The dark Escape menu has clickable resume, settings, controls, and quit buttons. Settings control AO, VSync, voxel outlines, night vision, and time of day. Distance & fog opens separate controls for render distance, fog on/off, fog start and fog strength. The world menu has a Title screen button for choosing another seed. Creating another world discards the old session; old-world cleanup runs on the loading worker. Use local time makes the sun, moon, and HUD clock follow the computer clock in its local timezone. It is off by default and applies for the current session. Disabling it keeps the current game time; using -/= or the time buttons also switches back to manual control. Menus scale with the window and high-DPI displays. H hides the HUD for screenshots; Esc restores the menu.
 
@@ -38,7 +38,7 @@ After loading, the normal world menu appears. Physics remains paused until Play,
 
 ## Terrain generation
 
-The default scene ports the terrain density and extends the aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates stone, water and air before applying the surface rules. Biome-driven surfaces follow the raw density/aquifer pass. Ores, structures and vegetation are not generated yet. Existing editing materials and renderer effects remain available.
+The default scene ports the terrain density and extends the aquifer decisions from [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), pinned to `d681c0532d5e2628c70e6de7fad7df31f64ea705`. It generates stone, water and air before applying the surface rules. Biome-driven surfaces follow the raw density/aquifer pass. A deterministic feature stage then adds biome vegetation, small mineral inclusions and occasional terrain-fitted cottages. Existing editing materials and renderer effects remain available.
 
 One reference block is one metre. Fine voxel `(x,y,z)` samples density at `origin + (x,y,z)/16`, with no rounding to metre coordinates. The bundled density graph, noise parameters, xoroshiro stream, named MD5 seeds, octave order, spline float rounding, cave thresholds, sea level and aquifer pressure rules come from the Java implementation. Its interpolated density cells become 4 × 8 × 4 metre cells with trilinear interpolation. Aquifers now use full 3D cells with seed names that include X/Y/Z. The nearest fluid regions, floodedness, level spread, preliminary surface columns and pressure barriers all use Z. Preliminary aquifer heights use the original exact columns and one-metre positive-density scan. Horizontal density terms are evaluated once per column, and conservative bounds skip empty height ranges without changing the result. Pressure uses the fine voxel centre, with a one-voxel stone seal at wet/dry cell boundaries that negative barrier noise cannot puncture. The original unimplemented lava band remains air.
 
@@ -76,7 +76,7 @@ Source details and the adapter changes are recorded in [the worldgen asset notes
 
 ### Biomes and surface rules
 
-The next pass ports the pinned Paper-Minecraft biome parameter table and JSON surface rules. It adds 24 materials, including gravel, sandstone, red sand, deepslate, bedrock, calcite, mud, podzol, mycelium, snow, ice, terracotta bands, sulfur and cinnabar. Grass, podzol and mycelium have earthy side faces. There are no generated trees, ores, structures or other features yet.
+The surface pass uses the pinned Paper-Minecraft biome parameter table and JSON surface rules. It adds 24 materials, including gravel, sandstone, red sand, deepslate, bedrock, calcite, mud, podzol, mycelium, snow, ice, terracotta bands, sulfur and cinnabar. Grass, podzol and mycelium have earthy side faces. Vegetation, mineral inclusions and cottages are added by the feature pass described below.
 
 Six original climate channels select biomes on the source's four-metre grid. Fine terrain still samples every 6.25 cm; surface depths, altitude conditions, seabeds and bedrock/deepslate transitions retain metre units. Column context is derived from raw density/aquifers across page boundaries, independent of which neighbors are loaded. Surface decoration runs on the existing sampling workers before meshing and lighting, with bounded column caches. Uniform results compact back to one material byte. Unloaded lighting queries account for surface rules that replace stone with air or water; the other new materials currently behave as opaque solid blocks, including ice and powder snow.
 
@@ -125,6 +125,27 @@ This first LOD pass reduces rendering geometry and mesh memory. It still generat
 | Seed -67 cave | 1.72 MiB | 0.79 MiB | 0.38 MiB |
 
 The seed -67 region's submitted geometry fell from 25,350 to 6,464 triangles at far detail. These are representation sizes, not a measurement of desktop FPS. The first benchmark pass includes generation/lighting while subsequent levels reuse those caches, so their elapsed times are not directly comparable.
+
+## Vegetation, structures and minerals
+
+All 56 bundled biomes have an explicit feature profile. Forests use tapered bark/heartwood trunks, flared roots, branching limbs, fine shoots and leaf sprays. Birch, cherry, conifer, snowy conifer, acacia-like savanna trees, pale hanging growth, bamboo and wetland stilt roots vary the silhouettes. Meadows have grass tufts, actual seed kernels, jointed wheat stalks with grain heads, flowers with separate stem/petal/pollen parts, and sunflowers. Other treatments include ferns, mushrooms, dune grass, cacti, alpine lichen, cave moss, hanging vines, dripstone, sculk-like growth and sulfur crystals. Rivers have reeds and submerged plants; oceans have kelp/seagrass, with branching coral in warm oceans. Individual fine voxels remain editable. Plants currently generate mature; growth, harvesting inventories and animal simulation are not included.
+
+Feature plans depend on seed and stable world-space anchors. Bounded worker caches retain recipes and sparse page overlays. Rasterization clips each primitive to the requested page, including pages that were empty after the terrain stage. Generation order and cache eviction do not change a feature. Point and skylight queries use the same plans for unloaded plants, buildings and lamps. Soft plant parts are non-solid and filter propagated light; wood and mineral inclusions stay solid. Existing edit overrides apply after feature generation.
+
+Occasional cottages require dry, gently sloped sites, with foundations, hollow rooms, timber, glazed windows, warm lamps and wheat plots. Generated door panels stay editable terrain until the first E interaction recognizes them through the existing frame/handle system. They then use the normal movable door, damage and repair paths. Generated lamp sources are found even before their voxel pages load; player removals mask the source.
+
+`assets/worldgen/ores.json` copies 19 Overworld ore placement passes and their biome memberships from the pinned source. Coal, iron, copper, gold, redstone, lapis, diamond and emerald keep the source attempt counts per 16 × 16 metre column, uniform/triangular height laws, rarity filters and air-exposure reduction. Out-of-world height samples are discarded rather than resampled. Extra badlands gold, mountain emeralds and larger dripstone copper deposits retain their restrictions. Vein shapes and random streams are MiniCraft adaptations: scattered 6.25 cm mineral inclusions replace stone/deepslate within clustered host regions, leaving host rock between the pieces. They are geometry, not ore textures or metre-wide solid ore blocks. No base density or historical density reference changes are involved.
+
+Use `--no-features` to retain biome surfaces without vegetation, buildings or ores. `--noise-only` disables both stages. Controlled reference plots can be opened with `--showcase BIOME`, `--showcase tree`, `--showcase plants`, `--showcase cabin` or `--showcase ores`. These use production shape recipes on a prepared plot, not a promise of natural feature density at that location.
+
+```sh
+cargo run --release -- --showcase cherry_grove
+cargo run --release -- --showcase plants --screenshot plants.png --view feature-close --ui clean --time 10.5 --no-fog
+python3 scripts/capture-features.py --output /tmp/minicraft-gallery
+python3 scripts/feature-assets.py /path/to/Paper-Minecraft
+```
+
+The capture script produces all 56 biome previews, plant/tree/cottage views and individual cut-open mineral specimens. `--ui clean` hides the HUD for captures. The JSON manifest records each scene, camera and time. Cave previews use night vision. They complement procedural-world captures and CPU checks of generation order, optical parity, original ore height distributions and working cottage doors.
 
 ## Editable doors
 
@@ -220,7 +241,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, P
 ./scripts/package-windows.sh
 ```
 
-This produces `../releases/v0.14.1/minicraft-v0.14.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `../releases/v0.15.0/minicraft-v0.15.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 

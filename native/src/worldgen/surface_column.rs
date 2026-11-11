@@ -180,7 +180,7 @@ impl Cache {
         }
         false
     }
-    pub(super) fn biome(
+    pub(in crate::worldgen) fn biome(
         &mut self,
         surface: &Surface,
         sampler: &mut TerrainSampler<'_>,
@@ -207,7 +207,7 @@ impl Cache {
             surface.biomes.sample(col.candidate, sampler.depth(p))
         })
     }
-    pub(super) fn height(&mut self, sampler: &mut TerrainSampler<'_>, key: Xz) -> f64 {
+    pub(in crate::worldgen) fn height(&mut self, sampler: &mut TerrainSampler<'_>, key: Xz) -> f64 {
         if self.heights.len() >= 65536 {
             self.heights.clear();
         }
