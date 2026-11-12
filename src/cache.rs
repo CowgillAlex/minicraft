@@ -1,12 +1,15 @@
 //! Bounded second-chance caches retain recently used work without global resets.
-use std::{collections::HashMap, hash::Hash};
+use rustc_hash::FxHashMap;
+use std::hash::Hash;
 struct Entry<K, V> {
     key: K,
     value: V,
     used: bool,
 }
 pub struct Cache<K, V, const N: usize> {
-    index: HashMap<K, usize>,
+    // Keys are internal coordinates/IDs, so use integer hashing rather than
+    // paying for cryptographic hashing in every terrain and lighting query.
+    index: FxHashMap<K, usize>,
     slots: Vec<Option<Entry<K, V>>>,
     free: Vec<usize>,
     hand: usize,
@@ -14,7 +17,7 @@ pub struct Cache<K, V, const N: usize> {
 impl<K, V, const N: usize> Default for Cache<K, V, N> {
     fn default() -> Self {
         Self {
-            index: HashMap::new(),
+            index: FxHashMap::default(),
             slots: Vec::new(),
             free: Vec::new(),
             hand: 0,

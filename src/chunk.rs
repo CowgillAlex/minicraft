@@ -43,6 +43,23 @@ impl Chunk {
             Arc::make_mut(cells)[index] = material;
         }
     }
+    /// Detach a shared page once for a material pass, then restore occupancy and
+    /// compact storage. Per-voxel edits keep using `set`.
+    pub fn with_cells_mut(&mut self, edit: impl FnOnce(&mut [u8])) {
+        if let Self::Uniform(material) = self {
+            *self = Self::Dense {
+                cells: Arc::from(vec![*material; CHUNK.pow(3)]),
+                occupied: 0,
+            };
+        }
+        if let Self::Dense { cells, occupied } = self {
+            let cells = Arc::make_mut(cells);
+            edit(cells);
+            *occupied = cells.iter().filter(|&&m| m != AIR).count();
+        }
+        self.compact();
+    }
+
     /// Restore compact storage after a bulk material pass.
     pub fn compact(&mut self) {
         if let Self::Dense { cells, .. } = self {
@@ -71,6 +88,24 @@ impl Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bulk_material_pass_preserves_snapshots_occupancy_and_compaction() {
+        let mut page = Chunk::Uniform(crate::world::STONE);
+        page.with_cells_mut(|cells| cells[7] = AIR);
+        let snapshot = page.clone();
+        page.with_cells_mut(|cells| {
+            cells[7] = crate::world::DIRT;
+            cells[8..12].fill(AIR);
+        });
+        assert_eq!(page.occupied(), CHUNK.pow(3) - 4);
+        assert_eq!(snapshot.occupied(), CHUNK.pow(3) - 1);
+        assert_eq!(snapshot.get(7), AIR);
+        assert_eq!(snapshot.get(8), crate::world::STONE);
+        page.with_cells_mut(|cells| cells.fill(AIR));
+        assert!(matches!(page, Chunk::Uniform(AIR)));
+        assert_eq!(page.occupied(), 0);
+    }
+
     #[test]
     fn uniform_chunks_expand_on_edit_without_changing_snapshots() {
         let mut world = crate::world::World::with_height(384 * 16);

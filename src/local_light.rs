@@ -146,13 +146,27 @@ fn run(preview: Preview, shared: Arc<Shared>, tx: mpsc::SyncSender<Update>) {
             if *rev > revision {
                 continue;
             }
-            let changed = field
-                .update_sampled(
+            let origin = key.map(|v| v * 128);
+            let changed = if field.needs_lamp_halo(&world, origin) {
+                if let Some(expanded) = LightField::build_streamed(
                     &world,
-                    &cells,
+                    origin,
                     &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false),
-                )
-                .is_some();
+                ) {
+                    *field = expanded;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                field
+                    .update_sampled(
+                        &world,
+                        &cells,
+                        &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false),
+                    )
+                    .is_some()
+            };
             *rev = revision;
             if changed {
                 shared.waiting.fetch_add(1, Ordering::AcqRel);
@@ -161,7 +175,7 @@ fn run(preview: Preview, shared: Arc<Shared>, tx: mpsc::SyncSender<Update>) {
                 && tx
                     .send(Update {
                         key,
-                        pixels: field.crop([31; 3], [34; 3]),
+                        pixels: field.region_pixels(origin),
                         revision,
                     })
                     .is_err()
@@ -228,13 +242,13 @@ mod tests {
         let mut sampler = generator.sampler();
         let mut sky = Sky::default();
         let mut tiles = Tiles::default();
-        let mut field = LightField::build_sampled(
+        let mut field = LightField::build_streamed(
             &world,
-            origin,
-            [96; 3],
+            key.map(|v| v * 128),
             &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false),
         )
         .unwrap();
+        assert_eq!(field.size(), [70; 3]);
         field.prepare_edits(&mut Source::new(
             &world,
             &mut sampler,

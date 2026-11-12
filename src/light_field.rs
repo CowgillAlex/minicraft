@@ -187,6 +187,60 @@ pub trait LightSource {
 }
 
 impl LightField {
+    fn region_layout(origin: [i32; 3], lamps: bool) -> ([i32; 3], [usize; 3]) {
+        // A path of this many steps still carries at least one unit of light.
+        // The extra two output samples are the texture's filtering border.
+        let falloff = if lamps { BLOCK_FALLOFF } else { SKY_FALLOFF };
+        let halo = usize::from(254 / falloff);
+        (
+            origin.map(|v| v - (halo as i32 + 1) * STEP),
+            [34 + halo * 2; 3],
+        )
+    }
+
+    fn external_lamp(p: [i32; 3], origin: [i32; 3]) -> bool {
+        (0..3).any(|i| p[i] < origin[i] || p[i] >= origin[i] + 128)
+    }
+
+    fn has_external_region_lamp(world: &World, origin: [i32; 3]) -> bool {
+        let (low, size) = Self::region_layout(origin, true);
+        world.emitters.iter().any(|p| {
+            Self::external_lamp(*p, origin)
+                && (0..3).all(|i| {
+                    p[i] >= low[i] - STEP * 2 && p[i] < low[i] + size[i] as i32 * STEP + STEP * 2
+                })
+        })
+    }
+
+    pub fn build_streamed(
+        world: &World,
+        origin: [i32; 3],
+        source: &mut impl LightSource,
+    ) -> Option<Self> {
+        let (full_low, full_size) = Self::region_layout(origin, true);
+        // An internal lamp cannot leave the 18-step sky halo and return to
+        // the output within its 31-step reach. External lamps need more space.
+        let lamps = Self::has_external_region_lamp(world, origin)
+            || source
+                .emitters(full_low, full_size)
+                .into_iter()
+                .any(|p| Self::external_lamp(p, origin));
+        let (low, size) = Self::region_layout(origin, lamps);
+        Self::build_sampled(world, low, size, source)
+    }
+
+    pub fn region_pixels(&self, origin: [i32; 3]) -> Vec<u8> {
+        self.crop(
+            std::array::from_fn(|i| ((origin[i] - STEP - self.grid.origin[i]) / STEP) as usize),
+            [34; 3],
+        )
+    }
+
+    pub fn needs_lamp_halo(&self, world: &World, origin: [i32; 3]) -> bool {
+        self.grid.size[0] < Self::region_layout(origin, true).1[0]
+            && Self::has_external_region_lamp(world, origin)
+    }
+
     /// Keep an editable graph ready even when uniform illumination needed no flood.
     pub fn prepare_edits(&mut self, source: &mut impl LightSource) {
         if !self.edges.is_empty() {

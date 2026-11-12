@@ -104,6 +104,8 @@ fn lod_region_benchmark() {
 #[test]
 #[ignore = "manual decorated flight benchmark"]
 fn decorated_flight_benchmark() {
+    let mut cold = Vec::new();
+    let mut adjacent = Vec::new();
     for (name, seed, x, z) in [
         ("forest", 1794358123416304200i64, -1800., -2056.),
         ("savanna", 8349847389, 84., 28.),
@@ -127,15 +129,29 @@ fn decorated_flight_benchmark() {
             ..Default::default()
         });
         let mut builder = Builder::new(world, &generator, Sky::default());
-        for step in [0, 1, 2, 0] {
+        for (index, step) in [0, 1, 2, 0].into_iter().enumerate() {
             let key = [first[0] + step, first[1], first[2]];
             let start = Instant::now();
             let result = builder.build(key, 0, center(key), || false).unwrap();
+            let elapsed = start.elapsed().as_secs_f64();
+            if index == 0 {
+                cold.push(elapsed);
+            } else if index < 3 {
+                adjacent.push(elapsed);
+            }
             println!(
-                "DECORATED {name} step={step} elapsed={:.5} bytes={}",
-                start.elapsed().as_secs_f64(),
-                result.bytes
+                "DECORATED {name} step={step} elapsed={:.5} bytes={} light_grid={:?}",
+                elapsed,
+                result.bytes,
+                result.field.as_ref().map(|f| f.size())
             );
         }
     }
+    println!(
+        "DECORATED TARGET 2.00s per 8m region: cold max={:.3}s, adjacent max={:.3}s, over target={}/{}",
+        cold.iter().copied().fold(0., f64::max),
+        adjacent.iter().copied().fold(0., f64::max),
+        cold.iter().chain(&adjacent).filter(|&&v| v > 2.).count(),
+        cold.len() + adjacent.len(),
+    );
 }

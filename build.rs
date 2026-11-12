@@ -41,16 +41,35 @@ BEGIN
  END
 END
 "#,
-        root.join("assets/app.ico").display(),
-        out.join("app.manifest").display(),
+        root.join("assets/app.ico")
+            .display()
+            .to_string()
+            .replace('\\', "/"),
+        out.join("app.manifest")
+            .display()
+            .to_string()
+            .replace('\\', "/"),
         numbers,
         numbers,
         version,
         version
     );
     let rc = out.join("version.rc");
-    let object = out.join("version.o");
     fs::write(&rc, resource).unwrap();
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        let resource_file = out.join("version.res");
+        let status = Command::new("rc.exe")
+            .arg("/nologo")
+            .arg("/fo")
+            .arg(&resource_file)
+            .arg(&rc)
+            .status()
+            .expect("Install the Windows SDK resource compiler (rc.exe)");
+        assert!(status.success(), "Windows resource compilation failed");
+        println!("cargo:rustc-link-arg={}", resource_file.display());
+        return;
+    }
+    let object = out.join("version.o");
     let status = Command::new("x86_64-w64-mingw32-windres")
         .arg(&rc)
         .arg("-O")

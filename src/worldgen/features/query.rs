@@ -67,6 +67,35 @@ impl TerrainSampler<'_> {
         surfaces: bool,
         features: bool,
     ) -> Option<u8> {
+        if features {
+            let sizes = [4., 8., 4.];
+            let key = std::array::from_fn::<_, 3, _>(|i| (min[i] / sizes[i]).floor() as i32);
+            let lo = std::array::from_fn(|i| key[i] as f64 * sizes[i]);
+            let hi = std::array::from_fn(|i| lo[i] + sizes[i] - 1. / 16.);
+            if (0..3).all(|i| max[i] <= hi[i]) {
+                let cache_key = (key, surfaces, features);
+                let cached = if let Some(value) = self.optical_uniform_cells.get(&cache_key) {
+                    *value
+                } else {
+                    let value = self.world_uniform_uncached(lo, hi, surfaces, features);
+                    self.optical_uniform_cells.insert(cache_key, value);
+                    value
+                };
+                if cached.is_some() {
+                    return cached;
+                }
+            }
+        }
+        self.world_uniform_uncached(min, max, surfaces, features)
+    }
+
+    fn world_uniform_uncached(
+        &mut self,
+        min: [f64; 3],
+        max: [f64; 3],
+        surfaces: bool,
+        features: bool,
+    ) -> Option<u8> {
         let base = self.light_uniform(min, max, surfaces)?;
         if !features {
             return Some(base);

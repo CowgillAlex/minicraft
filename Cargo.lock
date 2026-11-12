@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "minicraft"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "bytemuck",
  "chrono",
@@ -967,6 +967,7 @@ dependencies = [
  "meshopt",
  "png",
  "pollster",
+ "rustc-hash",
  "serde_json",
  "wgpu",
  "winit",

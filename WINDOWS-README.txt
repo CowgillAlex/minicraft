@@ -1,7 +1,7 @@
-MINICRAFT v0.16.0
+MINICRAFT v0.16.1
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.16.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.16.1-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -15,7 +15,12 @@ and its small meshing border are prepared before play. Sampling runs on a
 bounded worker pool, prioritizing the view and travel direction.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
-STREAMING IN v0.16.0
+STREAMING IN v0.16.1
+Generation reuses prepared density bounds and groups vertical pages on workers.
+The initial spawn generates in parallel. Surface and feature materials use bulk
+writes; skylight and transport reuse whole-cell optical proofs. Concurrent
+workers share each feature-plan build. Terrain resolution and shapes are unchanged.
+
 Lighting tests exact feature shapes without rasterizing full pages or generating
 ore deposits. Uniform base and resident pages reuse their optical response.
 Workers share feature plans, caches evict old work incrementally, and surface

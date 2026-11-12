@@ -218,6 +218,41 @@ fn preview_height_defaults_to_the_full_reference_range_and_old_origins_remain_va
 }
 
 #[test]
+fn prepared_bounds_match_graph_intervals_and_enclose_density() {
+    for seed in [0, 1, 12345, -928341, i64::MIN, i64::MAX] {
+        let generator = Generator::new(seed).unwrap();
+        let mut sampler = generator.sampler();
+        for cell in [
+            [0, -8, 0],
+            [-450, 8, -514],
+            [10, 4, 3],
+            [34, 7, -10],
+            [0, 39, 0],
+        ] {
+            for dimensions in [[3.5, 7.0, 3.5], [0.0, 7.0, 0.0], [1.5, 0.0, 1.5]] {
+                let min = std::array::from_fn(|i| cell[i] as f64 * [4., 8., 4.][i] + 0.125);
+                let max = std::array::from_fn(|i| min[i] + dimensions[i]);
+                let prepared = sampler.prepared(min, max).unwrap();
+                let actual = prepared.bounds(min, max);
+                let expected = sampler.density.bounds(generator.density.roots[0], min, max);
+                assert!(
+                    (actual[0] - expected.low).abs() < 1e-12,
+                    "{seed} {min:?}: {:?} vs {}",
+                    actual,
+                    expected.low
+                );
+                assert!((actual[1] - expected.high).abs() < 1e-12);
+                for step in 0..=16 {
+                    let point = std::array::from_fn(|i| min[i] + dimensions[i] * step as f64 / 16.);
+                    let value = sampler.density(point);
+                    assert!(value >= actual[0] - 1e-12 && value <= actual[1] + 1e-12);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn prepared_fields_match_the_java_density_reference() {
     let data: Value =
         serde_json::from_str(include_str!("../../assets/worldgen/java-continuous.json")).unwrap();

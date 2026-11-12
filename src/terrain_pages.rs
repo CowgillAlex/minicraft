@@ -12,16 +12,54 @@ use crate::{
         Generator,
     },
 };
-use std::sync::{mpsc, Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{mpsc, Arc, Mutex},
+};
 type Tile = Arc<[u8; 8 * 8 * 8 * 3]>;
 enum Job {
-    Page(Key),
+    Pages(Vec<Key>),
     Mesh(Arc<World>, Key, crate::terrain_lod::Level),
     Tiles(Arc<World>, Vec<Key>),
     Sky(Arc<World>, Vec<[i32; 2]>),
 }
+
+#[cfg(test)]
+#[test]
+fn column_batches_match_independent_decorated_pages_and_cancel() {
+    for (seed, x, z) in [(8349847389, 42, 14), (1794358123416304200, -900, -1028)] {
+        let generator = Generator::new(seed).unwrap();
+        let preview = Preview {
+            seed,
+            origin: [0, -64, 0],
+            surfaces: true,
+            features: true,
+            ..Default::default()
+        };
+        let keys: Vec<_> = (62..68).flat_map(|y| [[x, y, z], [x + 1, y, z]]).collect();
+        let mut reference = generator.sampler();
+        let expected: BTreeMap<_, _> = keys
+            .iter()
+            .map(|&key| {
+                (
+                    key,
+                    page::generate(preview, &mut reference, key.map(|v| v * 32))
+                        .data
+                        .to_vec(),
+                )
+            })
+            .collect();
+        let pool = Pages::new(preview, generator.feature_plans.clone());
+        let actual = pool.generate(keys.iter().rev().copied().collect(), &|| false);
+        assert_eq!(actual.len(), expected.len());
+        for (key, data) in actual {
+            assert_eq!(data.to_vec(), expected[&key], "seed {seed} at {key:?}");
+        }
+        assert!(pool.generate(keys, &|| true).is_empty());
+    }
+}
 enum Done {
-    Page(Key, Chunk),
+    Pages(Vec<(Key, Chunk)>),
     Mesh(Key, Arc<crate::gpu_vertex::PackedMesh>),
     Tiles(Vec<(Key, Tile)>),
     Sky(Vec<([i32; 2], Column)>),
@@ -37,7 +75,7 @@ impl Pages {
         let workers = std::thread::available_parallelism()
             .map_or(1, usize::from)
             .saturating_sub(2)
-            .clamp(1, 4);
+            .clamp(1, 8);
         let (jobs, rx) = mpsc::sync_channel::<Job>(workers * 2);
         let rx = Arc::new(Mutex::new(rx));
         let (tx, results) = mpsc::sync_channel(workers * 2);
@@ -59,9 +97,20 @@ impl Pages {
                         };
                         let result =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
-                                Job::Page(key) => Done::Page(
-                                    key,
-                                    page::generate(preview, &mut sampler, key.map(|v| v * 32)).data,
+                                Job::Pages(keys) => Done::Pages(
+                                    keys.into_iter()
+                                        .map(|key| {
+                                            (
+                                                key,
+                                                page::generate(
+                                                    preview,
+                                                    &mut sampler,
+                                                    key.map(|v| v * 32),
+                                                )
+                                                .data,
+                                            )
+                                        })
+                                        .collect(),
                                 ),
                                 Job::Mesh(world, key, level) => {
                                     let cached = meshes.lock().unwrap().get(key);
@@ -111,6 +160,14 @@ impl Pages {
         self.meshes.lock().unwrap().invalidate(cells);
     }
     fn execute(&self, jobs: Vec<Job>, cancel: &dyn Fn() -> bool) -> Vec<Done> {
+        self.execute_observed(jobs, cancel, |_| {})
+    }
+    fn execute_observed(
+        &self,
+        jobs: Vec<Job>,
+        cancel: &dyn Fn() -> bool,
+        mut observe: impl FnMut(&Done),
+    ) -> Vec<Done> {
         let mut next = jobs.into_iter();
         let mut active = 0;
         let mut complete = Vec::new();
@@ -127,24 +184,54 @@ impl Pages {
             if active == 0 {
                 break;
             }
-            complete.push(
-                self.results
-                    .recv()
-                    .expect("sampling pool stopped")
-                    .expect("terrain sampling failed"),
-            );
+            let done = self
+                .results
+                .recv()
+                .expect("sampling pool stopped")
+                .expect("terrain sampling failed");
+            observe(&done);
+            complete.push(done);
             active -= 1;
         }
         complete
     }
     pub fn generate(&self, keys: Vec<Key>, cancel: &dyn Fn() -> bool) -> Vec<(Key, Chunk)> {
-        self.execute(keys.into_iter().map(Job::Page).collect(), cancel)
-            .into_iter()
-            .map(|d| {
-                let Done::Page(k, c) = d else { unreachable!() };
-                (k, c)
+        self.generate_with_progress(keys, cancel, |_| {})
+    }
+    pub fn generate_with_progress(
+        &self,
+        keys: Vec<Key>,
+        cancel: &dyn Fn() -> bool,
+        mut completed: impl FnMut(usize),
+    ) -> Vec<(Key, Chunk)> {
+        // A worker keeps the expensive fine-column surface context across
+        // vertical pages. Limit batches so obsolete work remains bounded.
+        let mut columns = BTreeMap::<[i32; 2], Vec<Key>>::new();
+        for key in keys {
+            columns.entry([key[0], key[2]]).or_default().push(key);
+        }
+        let jobs = columns
+            .into_values()
+            .flat_map(|mut keys| {
+                keys.sort_unstable_by_key(|key| key[1]);
+                keys.chunks(4)
+                    .map(|keys| Job::Pages(keys.to_vec()))
+                    .collect::<Vec<_>>()
             })
-            .collect()
+            .collect();
+        self.execute_observed(jobs, cancel, |done| {
+            if let Done::Pages(pages) = done {
+                completed(pages.len());
+            }
+        })
+        .into_iter()
+        .flat_map(|d| {
+            let Done::Pages(pages) = d else {
+                unreachable!()
+            };
+            pages
+        })
+        .collect()
     }
     pub fn meshes(
         &self,

@@ -118,24 +118,89 @@ impl Plan {
 
 impl Prepared {
     #[inline]
+    fn interpolate(&self, index: usize, t: [f64; 3]) -> f64 {
+        let v = &self.values[index];
+        let a = (v[0] * (1.0 - t[0]) + v[1] * t[0]) * (1.0 - t[1])
+            + (v[2] * (1.0 - t[0]) + v[3] * t[0]) * t[1];
+        if t[2] == 0.0 {
+            a
+        } else {
+            let b = (v[4] * (1.0 - t[0]) + v[5] * t[0]) * (1.0 - t[1])
+                + (v[6] * (1.0 - t[0]) + v[7] * t[0]) * t[1];
+            a * (1.0 - t[2]) + b * t[2]
+        }
+    }
+
+    /// The same conservative interval operations as the graph evaluator, using
+    /// already prepared corners instead of recursively visiting graph nodes.
+    pub fn bounds(&self, min: [f64; 3], max: [f64; 3]) -> [f64; 2] {
+        let range = |index| {
+            let mut low = f64::INFINITY;
+            let mut high = f64::NEG_INFINITY;
+            for corner in 0..8 {
+                if (0..3).any(|axis| min[axis] == max[axis] && corner & (1 << axis) != 0) {
+                    continue;
+                }
+                let t = std::array::from_fn(|axis| {
+                    let p = if corner & (1 << axis) == 0 {
+                        min[axis]
+                    } else {
+                        max[axis]
+                    };
+                    (p - self.base[axis]) / [4.0, 8.0, 4.0][axis]
+                });
+                let value = self.interpolate(index, t);
+                low = low.min(value);
+                high = high.max(value);
+            }
+            [low, high]
+        };
+        let scale = |[low, high]: [f64; 2], factor: f64| {
+            let a = low * factor;
+            let b = high * factor;
+            [a.min(b), a.max(b)]
+        };
+        let absolute = |[low, high]: [f64; 2]| {
+            [
+                if low <= 0.0 && high >= 0.0 {
+                    0.0
+                } else {
+                    low.abs().min(high.abs())
+                },
+                low.abs().max(high.abs()),
+            ]
+        };
+        let terrain = scale(range(0), self.plan.terrain_scale).map(|v| {
+            let c = v.clamp(-1.0, 1.0);
+            c / 2.0 - c * c * c / 24.0
+        });
+        let gate = range(1);
+        let inside = gate[0] >= self.plan.gate_min && gate[1] < self.plan.gate_max;
+        let noodle = if inside {
+            [self.plan.gate_value; 2]
+        } else {
+            let a = absolute(range(3));
+            let b = absolute(range(4));
+            let ridges = scale([a[0].max(b[0]), a[1].max(b[1])], self.plan.noodle_scale);
+            let thickness = range(2);
+            let mut result = [thickness[0] + ridges[0], thickness[1] + ridges[1]];
+            if !(gate[1] < self.plan.gate_min || gate[0] >= self.plan.gate_max) {
+                result[0] = result[0].min(self.plan.gate_value);
+                result[1] = result[1].max(self.plan.gate_value);
+            }
+            result
+        };
+        [terrain[0].min(noodle[0]), terrain[1].min(noodle[1])]
+    }
+
+    #[inline]
     pub fn sample(&self, point: [f64; 3]) -> f64 {
         let t = [
             (point[0] - self.base[0]) * 0.25,
             (point[1] - self.base[1]) * 0.125,
             (point[2] - self.base[2]) * 0.25,
         ];
-        let interpolate = |index: usize| {
-            let v = &self.values[index];
-            let a = (v[0] * (1.0 - t[0]) + v[1] * t[0]) * (1.0 - t[1])
-                + (v[2] * (1.0 - t[0]) + v[3] * t[0]) * t[1];
-            if t[2] == 0.0 {
-                a
-            } else {
-                let b = (v[4] * (1.0 - t[0]) + v[5] * t[0]) * (1.0 - t[1])
-                    + (v[6] * (1.0 - t[0]) + v[7] * t[0]) * t[1];
-                a * (1.0 - t[2]) + b * t[2]
-            }
-        };
+        let interpolate = |index| self.interpolate(index, t);
         let c = (self.plan.terrain_scale * interpolate(0)).clamp(-1.0, 1.0);
         let terrain = c / 2.0 - c * c * c / 24.0;
         let gate = interpolate(1);
