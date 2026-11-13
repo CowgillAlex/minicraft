@@ -29,6 +29,7 @@ pub fn opaque(material: u8) -> bool {
 
 #[derive(Clone)]
 pub struct World {
+    pub chunk_timings: crate::chunk_timings::Shared,
     chunks: HashMap<[i32; 3], crate::chunk::Chunk>,
     pub infinite: bool,
     pub spawn: Option<Vec3>,
@@ -49,6 +50,7 @@ impl World {
     pub fn with_height(height: i32) -> Self {
         assert!(height > 0 && height % CHUNK as i32 == 0);
         Self {
+            chunk_timings: Default::default(),
             chunks: HashMap::new(),
             infinite: false,
             spawn: None,

@@ -44,6 +44,7 @@ impl App {
             self.captured = capture && result.is_ok();
             if self.captured {
                 if let Some(renderer) = &mut self.renderer {
+                    renderer.ui.performance.resume();
                     renderer.ui.played = true;
                     renderer.ui.panel = ui::Panel::Pause;
                 }
@@ -79,6 +80,8 @@ impl App {
                             renderer.ui.panel = Panel::Settings
                         }
                         Action::View => renderer.ui.panel = Panel::View,
+                        Action::Graphics => renderer.ui.panel = Panel::Graphics,
+                        Action::GraphicsChange(change) => renderer.graphics.change(change),
                         Action::MaterialPage(page) => renderer.ui.panel = Panel::Materials(page),
                         Action::ViewChange(change) => renderer.view.change(change),
                         Action::Back => renderer.ui.panel = Panel::Pause,
@@ -159,6 +162,12 @@ impl App {
             KeyCode::F3 => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.ui.debug = !renderer.ui.debug;
+                }
+            }
+            KeyCode::F7 => {
+                self.chunk_timings = !self.chunk_timings;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.ui.chunk_timings = self.chunk_timings;
                 }
             }
             KeyCode::KeyH if self.captured => {

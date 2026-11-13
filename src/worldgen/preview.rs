@@ -165,6 +165,7 @@ impl Preview {
             let (sender, receiver) = mpsc::sync_channel(workers * 2);
             for _ in 0..workers {
                 let sender = sender.clone();
+                let timings = world.chunk_timings.clone();
                 let generator = &generator;
                 let next = &next;
                 scope.spawn(move || {
@@ -182,11 +183,17 @@ impl Preview {
                             index / (world::NX * world::NZ),
                             index / world::NX % world::NZ,
                         ];
+                        let started = Instant::now();
                         let data = super::page::generate(
                             self,
                             &mut sampler,
                             chunk.map(|v| v as i32 * CHUNK as i32),
                         );
+                        let ms = started.elapsed().as_secs_f32() * 1000.0;
+                        timings
+                            .lock()
+                            .unwrap()
+                            .generation(chunk.map(|v| v as i32), ms);
                         if sender.send((chunk, data)).is_err() {
                             break;
                         }

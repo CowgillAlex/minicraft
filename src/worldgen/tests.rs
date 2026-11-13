@@ -362,6 +362,7 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
         .to_array()
         .map(|v| v.div_euclid(32));
         assert!(collision.iter().any(|(key, _)| *key == feet));
+        let mut published = Vec::new();
         let region = loop {
             let result = stream
                 .results
@@ -371,14 +372,14 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
             stream.received();
             match result {
                 crate::terrain_stream::Update::Region(region) => break region,
-                crate::terrain_stream::Update::Pages(_) => {}
+                crate::terrain_stream::Update::Pages(pages) => published.extend(pages),
                 _ => panic!("unexpected cache eviction"),
             }
         };
         assert_eq!(region.key, expected);
-        assert!(!region.pages.is_empty());
-        assert!(region
-            .pages
+        assert!(region.pages.is_empty());
+        assert!(!published.is_empty());
+        assert!(published
             .iter()
             .all(|(key, _)| terrain_region::page_region(*key) == expected));
     }
@@ -402,6 +403,8 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
         stream.received();
         match result {
             crate::terrain_stream::Update::Region(r) => break r,
+            crate::terrain_stream::Update::Geometry(_) => {}
+            crate::terrain_stream::Update::Cancelled { .. } => {}
             crate::terrain_stream::Update::Pages(_) => {}
             _ => panic!("unexpected eviction"),
         }

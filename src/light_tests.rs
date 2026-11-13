@@ -1,5 +1,46 @@
 use super::*;
 #[test]
+fn cancelled_edit_graph_preparation_can_be_retried_without_partial_edges() {
+    struct Source {
+        cancel: bool,
+        edges: usize,
+    }
+    impl LightSource for Source {
+        fn cancelled(&self) -> bool {
+            self.cancel
+        }
+        fn material(&mut self, _: [i32; 3]) -> u8 {
+            world::AIR
+        }
+        fn sky(&mut self, _: [i32; 2], _: i32, len: usize) -> Vec<u8> {
+            vec![255; len]
+        }
+        fn edge(&mut self, _: [i32; 3], _: usize) -> u8 {
+            self.edges += 1;
+            // Cancel during connectivity, rather than before it starts.
+            if self.edges == 3 {
+                self.cancel = true;
+            }
+            0
+        }
+    }
+    let mut field = LightField {
+        grid: Grid::region([0; 3], [3; 3]),
+        pixels: vec![0; 54],
+        edges: Vec::new(),
+        seeds: vec![[0, 255]; 27],
+    };
+    let mut source = Source {
+        cancel: false,
+        edges: 0,
+    };
+    assert!(!field.prepare_edits(&mut source));
+    assert!(field.edges.is_empty());
+    source.cancel = false;
+    assert!(field.prepare_edits(&mut source));
+    assert_eq!(field.edges[field.grid.index(1, 1, 1)], [0; 6]);
+}
+#[test]
 #[ignore = "manual lighting benchmark"]
 fn benchmark_lighting_edits() {
     let mut world = World::generate();

@@ -63,6 +63,7 @@ impl Mesh {
                     }
                     let start = mesh.indices.len() as u32;
                     let glass_start = mesh.transparent_indices.len() as u32;
+                    let mesh_started = std::time::Instant::now();
                     mesh.chunk(
                         world,
                         [
@@ -70,6 +71,12 @@ impl Mesh {
                             cy as i32 * CHUNK as i32,
                             cz as i32 * CHUNK as i32,
                         ],
+                    );
+                    let ms = mesh_started.elapsed().as_secs_f32() * 1000.0;
+                    world.chunk_timings.lock().unwrap().mesh(
+                        [cx as i32, cy as i32, cz as i32],
+                        ms,
+                        false,
                     );
                     if mesh.indices.len() as u32 > start {
                         let center = World::meters(
@@ -103,6 +110,7 @@ impl Mesh {
         Ok(mesh)
     }
     pub fn build_chunk(world: &World, chunk: [i32; 3]) -> Self {
+        let started = std::time::Instant::now();
         let mut mesh = Self {
             vertices: Vec::new(),
             indices: Vec::new(),
@@ -113,6 +121,8 @@ impl Mesh {
         if world.has_geometry(chunk) && !world.buried_chunk(chunk) {
             mesh.chunk(world, chunk.map(|v| v * CHUNK as i32));
         }
+        let ms = started.elapsed().as_secs_f32() * 1000.0;
+        world.chunk_timings.lock().unwrap().mesh(chunk, ms, false);
         mesh
     }
     pub fn add_horizon(&mut self) {

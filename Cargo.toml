@@ -1,6 +1,6 @@
 [package]
 name = "minicraft"
-version = "0.16.1"
+version = "0.17.0"
 edition = "2021"
 description = "A native voxel world explorer with 1/16-metre voxels"
 

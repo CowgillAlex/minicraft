@@ -7,6 +7,7 @@ pub enum Panel {
     Controls,
     Settings,
     View,
+    Graphics,
     Materials(u8),
 }
 #[derive(Default)]
@@ -14,11 +15,13 @@ pub struct UiState {
     pub panel: Panel,
     pub pointer: [f32; 2],
     pub debug: bool,
+    pub chunk_timings: bool,
     pub played: bool,
     pub flying: bool,
     pub spectating: bool,
     pub grounded: bool,
     pub ticks: u64,
+    pub performance: crate::performance::History,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
@@ -33,6 +36,8 @@ pub enum Action {
     Grid,
     LocalTime,
     View,
+    Graphics,
+    GraphicsChange(crate::graphics::Change),
     ViewChange(crate::view_settings::Change),
     BackToSettings,
     Earlier,
@@ -81,6 +86,7 @@ impl Layout {
             Panel::Controls => (520.0, 516.0),
             Panel::Settings => (440.0, 550.0),
             Panel::View => (480.0, 588.0),
+            Panel::Graphics => (480.0, 590.0),
             Panel::Materials(_) => (680.0, 562.0),
         };
         Rect {
@@ -107,6 +113,30 @@ impl Layout {
             })
         };
         match panel {
+            Panel::Graphics => {
+                use crate::graphics::Change;
+                for (i, change) in [
+                    Change::Scale,
+                    Change::Ao,
+                    Change::Shadows,
+                    Change::Bloom,
+                    Change::Limit,
+                    Change::Occlusion,
+                    Change::Preset,
+                    Change::Reset,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    add(
+                        76.0 + i as f32 * 50.0,
+                        "",
+                        Action::GraphicsChange(change),
+                        false,
+                    );
+                }
+                add(520.0, "Back", Action::BackToSettings, false);
+            }
             Panel::Pause => {
                 add(108.0, "Back to world", Action::Resume, true);
                 add(162.0, "Settings", Action::Settings, false);
@@ -166,12 +196,13 @@ impl Layout {
                 }
             }
             Panel::Settings => {
-                add(80.0, "Distance & fog", Action::View, false);
-                add(134.0, "Ambient occlusion", Action::AmbientOcclusion, false);
-                add(188.0, "VSync", Action::Vsync, false);
-                add(242.0, "Voxel outlines", Action::Grid, false);
-                add(296.0, "Night vision", Action::NightVision, false);
-                add(350.0, "Use local time", Action::LocalTime, false);
+                add(64.0, "Graphics & performance", Action::Graphics, false);
+                add(110.0, "Distance & fog", Action::View, false);
+                add(156.0, "Ambient occlusion", Action::AmbientOcclusion, false);
+                add(202.0, "VSync", Action::Vsync, false);
+                add(248.0, "Voxel outlines", Action::Grid, false);
+                add(294.0, "Night vision", Action::NightVision, false);
+                add(340.0, "Use local time", Action::LocalTime, false);
                 add(482.0, "Back", Action::Back, false);
                 for (offset, label, action) in [
                     (0.0, "-", Action::Earlier),
@@ -232,11 +263,11 @@ mod tests {
         }
         let layout = Layout::new((1440, 900));
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 331.0]),
+            layout.action_at(Panel::Settings, [720.0, 353.0]),
             Some(Action::AmbientOcclusion)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 385.0]),
+            layout.action_at(Panel::Settings, [720.0, 399.0]),
             Some(Action::Vsync)
         );
         assert_eq!(
@@ -248,7 +279,7 @@ mod tests {
             Some(Action::Later)
         );
         assert_eq!(
-            layout.action_at(Panel::Settings, [720.0, 547.0]),
+            layout.action_at(Panel::Settings, [720.0, 537.0]),
             Some(Action::LocalTime)
         );
         assert_eq!(
@@ -257,7 +288,12 @@ mod tests {
         );
         for size in [(800, 600), (1440, 900), (3840, 2160)] {
             let layout = Layout::new(size);
-            for panel in [Panel::Settings, Panel::View, Panel::Materials(0)] {
+            for panel in [
+                Panel::Settings,
+                Panel::Graphics,
+                Panel::View,
+                Panel::Materials(0),
+            ] {
                 let bounds = layout.panel(panel);
                 for button in layout.buttons(panel) {
                     assert!(button.rect.y + button.rect.h <= layout.height);

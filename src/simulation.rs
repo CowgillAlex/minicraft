@@ -11,6 +11,7 @@ pub struct Simulation {
     accumulator: f64,
     jump_pending: bool,
     pub ticks: u64,
+    pub tick_times: Vec<f32>,
     before_spectator: Mode,
     spawn_pending: bool,
 }
@@ -27,6 +28,7 @@ impl Simulation {
             accumulator: 0.0,
             jump_pending: false,
             ticks: 0,
+            tick_times: Vec::with_capacity(5),
             before_spectator: Mode::Walk,
             spawn_pending: false,
         }
@@ -38,6 +40,7 @@ impl Simulation {
         self.jump_pending = false;
     }
     pub fn advance(&mut self, world: &World, input: Input, seconds: f64) {
+        self.tick_times.clear();
         if self.spawn_pending {
             if !Player::body_ready(world, self.player.position) {
                 return;
@@ -56,7 +59,9 @@ impl Simulation {
                 ..input
             };
             self.jump_pending = false;
+            let start = std::time::Instant::now();
             self.player.tick(world, tick_input);
+            self.tick_times.push(start.elapsed().as_secs_f32() * 1000.0);
             self.accumulator = (self.accumulator - TICK_SECONDS).max(0.0);
             self.ticks += 1;
         }

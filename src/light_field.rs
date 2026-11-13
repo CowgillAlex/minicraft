@@ -242,19 +242,18 @@ impl LightField {
     }
 
     /// Keep an editable graph ready even when uniform illumination needed no flood.
-    pub fn prepare_edits(&mut self, source: &mut impl LightSource) {
+    pub fn prepare_edits(&mut self, source: &mut impl LightSource) -> bool {
         if !self.edges.is_empty() {
-            return;
+            return true;
         }
         let grid = self.grid;
         source.prepare_edges(grid.origin, grid.size);
         self.edges = vec![[BLOCKED; 6]; self.seeds.len()];
-        self.connect(|p, axis| {
-            source.edge(
-                std::array::from_fn(|i| grid.origin[i] + p[i] as i32 * STEP + STEP / 2),
-                axis,
-            )
-        });
+        if !self.connect_source(source) {
+            self.edges.clear();
+            return false;
+        }
+        true
     }
     pub fn size(&self) -> [usize; 3] {
         self.grid.size
@@ -353,6 +352,33 @@ impl LightField {
             }
         }
     }
+    fn connect_source(&mut self, source: &mut impl LightSource) -> bool {
+        let grid = self.grid;
+        for z in 0..grid.size[2] {
+            if source.cancelled() {
+                return false;
+            }
+            for y in 0..grid.size[1] {
+                for x in 0..grid.size[0] {
+                    let p = [x, y, z];
+                    let i = grid.index(x, y, z);
+                    for axis in 0..3 {
+                        if p[axis] + 1 < grid.size[axis] {
+                            let cost = source.edge(
+                                std::array::from_fn(|a| {
+                                    grid.origin[a] + p[a] as i32 * STEP + STEP / 2
+                                }),
+                                axis,
+                            );
+                            self.edges[i][axis * 2 + 1] = cost;
+                            self.edges[i + grid.strides[axis]][axis * 2] = cost;
+                        }
+                    }
+                }
+            }
+        }
+        !source.cancelled()
+    }
     fn fill(&mut self) {
         for (channel, decay) in [BLOCK_FALLOFF, SKY_FALLOFF].into_iter().enumerate() {
             let mut buckets: Buckets = std::array::from_fn(|_| Vec::new());
@@ -418,28 +444,7 @@ impl LightField {
         }
         source.prepare_edges(origin, size);
         field.edges = vec![[BLOCKED; 6]; count];
-        for z in 0..size[2] {
-            if source.cancelled() {
-                return None;
-            }
-            for y in 0..size[1] {
-                for x in 0..size[0] {
-                    let p = [x, y, z];
-                    let i = grid.index(x, y, z);
-                    for axis in 0..3 {
-                        if p[axis] + 1 < size[axis] {
-                            let cost = source.edge(
-                                std::array::from_fn(|a| origin[a] + p[a] as i32 * STEP + STEP / 2),
-                                axis,
-                            );
-                            field.edges[i][axis * 2 + 1] = cost;
-                            field.edges[i + grid.strides[axis]][axis * 2] = cost;
-                        }
-                    }
-                }
-            }
-        }
-        if source.cancelled() {
+        if !field.connect_source(source) {
             return None;
         }
         let edges_time = profile_start.elapsed().as_secs_f64() - sky_time;

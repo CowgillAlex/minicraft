@@ -2,6 +2,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>, inverse_view_proj: mat4x4<f32>, light_view_proj: mat4x4<f32>,
     camera: vec4<f32>, sun: vec4<f32>, options: vec4<f32>,
     daylight: vec4<f32>, light_color: vec4<f32>, view: vec4<f32>,
+    quality: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(1) @binding(0) var depth_map: texture_depth_2d;
@@ -19,6 +20,9 @@ fn world_position(p: vec2<i32>) -> vec3<f32> {
     let pixel = full_pixel(p);
     let uv = (vec2<f32>(pixel) + 0.5) / vec2<f32>(textureDimensions(depth_map));
     let depth = textureLoad(depth_map, pixel, 0);
+    return reconstruct(uv,depth);
+}
+fn reconstruct(uv:vec2<f32>,depth:f32) -> vec3<f32> {
     let projected = scene.inverse_view_proj * vec4(uv * vec2(2.0,-2.0) + vec2(-1.0,1.0), depth, 1.0);
     return projected.xyz / projected.w;
 }
@@ -35,15 +39,19 @@ fn world_position(p: vec2<i32>) -> vec3<f32> {
     let rotation = f32((half_pixel.x & 3) + (half_pixel.y & 3) * 4) * 0.392699;
     var occlusion = 0.0;
     var samples = 0.0;
-    for (var ray = 0; ray < 8; ray++) {
-        let angle = f32(ray) * 0.785398 + rotation;
+    let rays=select(8,4,scene.quality.x<1.5);
+    let steps=select(3,2,scene.quality.x<1.5);
+    for (var ray = 0; ray < rays; ray++) {
+        let angle = f32(ray) * 6.283185 / f32(rays) + rotation;
         let direction = vec2(cos(angle),sin(angle));
-        for (var step = 1; step <= 3; step++) {
-            let fraction = f32(step) / 3.0;
+        for (var step = 1; step <= steps; step++) {
+            let fraction = f32(step) / f32(steps);
             let offset = vec2<i32>(round(direction * radius_pixels * fraction * fraction));
             let sample_pixel = full_pixel(pixel + offset);
-            if textureLoad(depth_map, sample_pixel, 0) > 0.99998 { continue; }
-            let delta = world_position(sample_pixel) - point;
+            let depth=textureLoad(depth_map, sample_pixel, 0);
+            if depth > 0.99998 { continue; }
+            let uv=(vec2<f32>(sample_pixel)+0.5)/vec2<f32>(textureDimensions(depth_map));
+            let delta = reconstruct(uv,depth) - point;
             let separation = length(delta);
             let horizon = max(dot(normal, delta) / max(separation,0.001) - 0.065, 0.0);
             let range_weight = 1.0 - smoothstep(0.03,radius,separation);
@@ -61,10 +69,11 @@ fn tonemap(color: vec3<f32>) -> vec3<f32> {
     let pixel = full_pixel(vec2<i32>(screen.xy));
     let raw_color=textureLoad(color_map,pixel,0).rgb;
     if scene.options.w>0.5 {return vec4(raw_color,1.0);}
-    let bloom=textureSampleLevel(bloom_map,bloom_sampler,screen.xy/vec2<f32>(textureDimensions(color_map)),0.0).rgb*mix(0.16,0.08,scene.daylight.x);
+    var bloom=vec3(0.0);
+    if scene.quality.y>0.5 { bloom=textureSampleLevel(bloom_map,bloom_sampler,screen.xy/vec2<f32>(textureDimensions(color_map)),0.0).rgb*mix(0.16,0.08,scene.daylight.x); }
     let color=raw_color;
     let packed = textureLoad(normal_map,pixel,0);
-    if scene.options.z < 0.5 || packed.a < 0.001 { return vec4(tonemap(color+bloom),1.0); }
+    if scene.options.z < 0.5 || scene.quality.x < 0.5 || packed.a < 0.001 { return vec4(tonemap(color+bloom),1.0); }
     let point = world_position(pixel);
     let normal = normalize(packed.xyz*2.0-1.0);
     let half_pos = (vec2<f32>(pixel)+0.5)*0.5-0.5;
@@ -72,7 +81,8 @@ fn tonemap(color: vec3<f32>) -> vec3<f32> {
     var total = 0.0;
     var weight_sum = 0.0;
     // Depth- and normal-aware reconstruction prevents dark halos at silhouettes.
-    for (var y = -1; y <= 1; y++) { for (var x = -1; x <= 1; x++) {
+    let start=select(-1,0,scene.quality.x<1.5);
+    for (var y = start; y <= 1; y++) { for (var x = start; x <= 1; x++) {
         let p = clamp(half_center+vec2(x,y),vec2(0),vec2<i32>(textureDimensions(ao_map))-1);
         let full = full_pixel(p*2+1);
         let other = textureLoad(normal_map,full,0);

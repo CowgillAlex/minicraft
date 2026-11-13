@@ -14,7 +14,10 @@ use crate::{
 };
 use std::{
     collections::BTreeMap,
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
 };
 type Tile = Arc<[u8; 8 * 8 * 8 * 3]>;
 enum Job {
@@ -22,6 +25,11 @@ enum Job {
     Mesh(Arc<World>, Key, crate::terrain_lod::Level),
     Tiles(Arc<World>, Vec<Key>),
     Sky(Arc<World>, Vec<[i32; 2]>),
+}
+struct QueuedJob {
+    job: Job,
+    cancel: Arc<AtomicBool>,
+    reply: mpsc::SyncSender<Result<Done, String>>,
 }
 
 #[cfg(test)]
@@ -59,32 +67,132 @@ fn column_batches_match_independent_decorated_pages_and_cancel() {
     }
 }
 enum Done {
+    Cancelled,
     Pages(Vec<(Key, Chunk)>),
     Mesh(Key, Arc<crate::gpu_vertex::PackedMesh>),
     Tiles(Vec<(Key, Tile)>),
     Sky(Vec<([i32; 2], Column)>),
 }
+
+#[cfg(test)]
+#[test]
+fn worker_timings_keep_generation_and_identify_source_mesh_reuse() {
+    let preview = Preview {
+        height_m: 12,
+        origin: [120, 58, -20],
+        surfaces: true,
+        features: true,
+        ..Default::default()
+    };
+    let generator = Generator::new(preview.seed).unwrap();
+    let mut world = World::with_height(192);
+    world.infinite = true;
+    world.noise_preview = Some(preview);
+    let key = [5, 1, 5];
+    let pool = Pages::with_timings(
+        preview,
+        generator.feature_plans.clone(),
+        world.chunk_timings.clone(),
+    );
+    for (key, data) in pool.generate(vec![key], &|| false) {
+        world.insert_page(key, data);
+    }
+    let generated = world
+        .chunk_timings
+        .lock()
+        .unwrap()
+        .get(key)
+        .generation_ms
+        .unwrap();
+    assert!(generated.is_finite() && generated >= 0.0);
+    pool.meshes(&world, vec![key], crate::terrain_lod::Level::Full, &|| {
+        false
+    });
+    let first = world.chunk_timings.lock().unwrap().get(key);
+    assert_eq!(first.generation_ms, Some(generated));
+    assert!(first.mesh_ms.unwrap().is_finite());
+    assert!(!first.source_cached);
+    pool.meshes(
+        &world,
+        vec![key],
+        crate::terrain_lod::Level::Medium,
+        &|| false,
+    );
+    let second = world.chunk_timings.lock().unwrap().get(key);
+    assert_eq!(second.generation_ms, Some(generated));
+    assert!(second.source_cached);
+    assert!(!second.mesh_cached);
+}
+#[derive(Clone)]
 pub struct Pages {
-    jobs: mpsc::SyncSender<Job>,
-    results: mpsc::Receiver<Result<Done, String>>,
+    jobs: mpsc::SyncSender<QueuedJob>,
     workers: usize,
     meshes: Arc<Mutex<crate::terrain_meshes::Cache>>,
 }
+
+#[cfg(test)]
+#[test]
+fn shared_pool_routes_concurrent_stage_results_and_cancellation_independently() {
+    let preview = Preview {
+        origin: [120, 318, -20],
+        height_m: 2,
+        ..Default::default()
+    };
+    let generator = Generator::new(preview.seed).unwrap();
+    let mut world = World::with_height(32);
+    world.infinite = true;
+    world.noise_preview = Some(preview);
+    let pool = Pages::with_workers(
+        preview,
+        generator.feature_plans.clone(),
+        world.chunk_timings.clone(),
+        2,
+    );
+    std::thread::scope(|scope| {
+        let a = pool.clone();
+        let b = pool.clone();
+        let c = pool.clone();
+        let world = &world;
+        let generated =
+            scope.spawn(move || a.generate((0..12).map(|x| [x, 0, 0]).collect(), &|| false));
+        let sky = scope.spawn(move || b.sky(world, vec![[2, 2], [6, 2], [10, 2]], &|| false));
+        let cancelled = scope.spawn(move || c.generate(vec![[100, 0, 0]], &|| true));
+        assert_eq!(generated.join().unwrap().len(), 12);
+        assert_eq!(sky.join().unwrap().len(), 3);
+        assert!(cancelled.join().unwrap().is_empty());
+    });
+}
 impl Pages {
+    #[cfg(test)]
     pub fn new(preview: Preview, shared: Arc<crate::worldgen::features::Shared>) -> Self {
+        Self::with_timings(preview, shared, Default::default())
+    }
+    pub fn with_timings(
+        preview: Preview,
+        shared: Arc<crate::worldgen::features::Shared>,
+        timings: crate::chunk_timings::Shared,
+    ) -> Self {
         let workers = std::thread::available_parallelism()
             .map_or(1, usize::from)
             .saturating_sub(2)
             .clamp(1, 8);
-        let (jobs, rx) = mpsc::sync_channel::<Job>(workers * 2);
+        Self::with_workers(preview, shared, timings, workers)
+    }
+    pub fn with_workers(
+        preview: Preview,
+        shared: Arc<crate::worldgen::features::Shared>,
+        timings: crate::chunk_timings::Shared,
+        workers: usize,
+    ) -> Self {
+        let workers = workers.max(1);
+        let (jobs, rx) = mpsc::sync_channel::<QueuedJob>(workers * 2);
         let rx = Arc::new(Mutex::new(rx));
-        let (tx, results) = mpsc::sync_channel(workers * 2);
         let meshes = Arc::new(Mutex::new(crate::terrain_meshes::Cache::default()));
         for id in 0..workers {
             let rx = rx.clone();
-            let tx = tx.clone();
             let shared = shared.clone();
             let meshes = meshes.clone();
+            let timings = timings.clone();
             std::thread::Builder::new()
                 .name(format!("terrain-samples-{id}"))
                 .spawn(move || {
@@ -92,43 +200,54 @@ impl Pages {
                     generator.feature_plans = shared;
                     let mut sampler = generator.sampler();
                     loop {
-                        let Ok(job) = rx.lock().unwrap().recv() else {
+                        let Ok(QueuedJob { job, cancel, reply }) = rx.lock().unwrap().recv() else {
                             return;
                         };
-                        let result =
-                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if cancel.load(Ordering::Relaxed) {
+                                return Done::Cancelled;
+                            }
+                            match job {
                                 Job::Pages(keys) => Done::Pages(
                                     keys.into_iter()
+                                        .take_while(|_| !cancel.load(Ordering::Relaxed))
                                         .map(|key| {
-                                            (
-                                                key,
-                                                page::generate(
-                                                    preview,
-                                                    &mut sampler,
-                                                    key.map(|v| v * 32),
-                                                )
-                                                .data,
+                                            let started = std::time::Instant::now();
+                                            let data = page::generate(
+                                                preview,
+                                                &mut sampler,
+                                                key.map(|v| v * 32),
                                             )
+                                            .data;
+                                            let ms = started.elapsed().as_secs_f32() * 1000.0;
+                                            timings.lock().unwrap().generation(key, ms);
+                                            (key, data)
                                         })
                                         .collect(),
                                 ),
                                 Job::Mesh(world, key, level) => {
+                                    let started = std::time::Instant::now();
                                     let cached = meshes.lock().unwrap().get(key);
+                                    let source_cached = cached.is_some();
                                     let mesh = cached.unwrap_or_else(|| {
                                         let mesh =
                                             Arc::new(crate::mesh::Mesh::build_chunk(&world, key));
                                         meshes.lock().unwrap().insert(key, mesh.clone());
                                         mesh
                                     });
-                                    Done::Mesh(
-                                        key,
-                                        Arc::new(crate::terrain_lod::reduce_cached(
-                                            &mesh, key, level,
-                                        )),
-                                    )
+                                    if cancel.load(Ordering::Relaxed) {
+                                        return Done::Cancelled;
+                                    }
+                                    let packed = Arc::new(crate::terrain_lod::reduce_cached(
+                                        &mesh, key, level,
+                                    ));
+                                    let ms = started.elapsed().as_secs_f32() * 1000.0;
+                                    timings.lock().unwrap().mesh(key, ms, source_cached);
+                                    Done::Mesh(key, packed)
                                 }
                                 Job::Tiles(world, keys) => Done::Tiles(
                                     keys.into_iter()
+                                        .take_while(|_| !cancel.load(Ordering::Relaxed))
                                         .map(|k| {
                                             (k, light_tiles::generate(&world, &mut sampler, k))
                                         })
@@ -137,21 +256,22 @@ impl Pages {
                                 Job::Sky(world, points) => Done::Sky(
                                     points
                                         .into_iter()
+                                        .take_while(|_| !cancel.load(Ordering::Relaxed))
                                         .map(|p| (p, sky::sample_column(&world, &mut sampler, p)))
                                         .collect(),
                                 ),
-                            }))
-                            .map_err(|_| "Terrain sampling worker failed".to_string());
-                        if tx.send(result).is_err() {
-                            return;
-                        }
+                            }
+                        }))
+                        .map_err(|_| "Terrain sampling worker failed".to_string());
+                        // Reply routing is per execution, so geometry and lighting may
+                        // share this worker pool without consuming each other's results.
+                        let _ = reply.send(result);
                     }
                 })
                 .expect("terrain sampling worker");
         }
         Self {
             jobs,
-            results,
             workers,
             meshes,
         }
@@ -172,25 +292,38 @@ impl Pages {
         let mut active = 0;
         let mut complete = Vec::new();
         let mut cancelled = false;
+        let token = Arc::new(AtomicBool::new(false));
+        let (reply, results) = mpsc::sync_channel(self.workers * 2);
         loop {
             cancelled |= cancel();
+            if cancelled {
+                token.store(true, Ordering::Relaxed);
+            }
             while !cancelled && active < self.workers * 2 {
                 let Some(job) = next.next() else {
                     break;
                 };
-                self.jobs.send(job).expect("sampling pool stopped");
+                self.jobs
+                    .send(QueuedJob {
+                        job,
+                        cancel: token.clone(),
+                        reply: reply.clone(),
+                    })
+                    .expect("sampling pool stopped");
                 active += 1;
             }
             if active == 0 {
                 break;
             }
-            let done = self
-                .results
-                .recv()
-                .expect("sampling pool stopped")
-                .expect("terrain sampling failed");
-            observe(&done);
-            complete.push(done);
+            let done = match results.recv_timeout(std::time::Duration::from_millis(10)) {
+                Ok(done) => done.expect("terrain sampling failed"),
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => panic!("sampling pool stopped"),
+            };
+            if !matches!(done, Done::Cancelled) {
+                observe(&done);
+                complete.push(done);
+            }
             active -= 1;
         }
         complete

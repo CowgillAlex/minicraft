@@ -8,6 +8,7 @@ struct Uniforms {
     daylight: vec4<f32>,
     light_color: vec4<f32>,
     view: vec4<f32>,
+    quality: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(1) @binding(0) var shadow_map: texture_depth_2d;

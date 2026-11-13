@@ -7,13 +7,17 @@ mod camera;
 mod capture;
 mod capture_views;
 mod chunk;
+mod chunk_timings;
 mod daylight;
 mod door_gpu;
 mod doors;
 mod editing;
 mod gpu;
+mod gpu_timing;
 mod gpu_vertex;
+mod graphics;
 mod hud;
+mod lagometer;
 mod light_field;
 mod light_tiles;
 mod light_volume;
@@ -23,6 +27,7 @@ mod mesh;
 mod mesh_stream;
 mod occlusion;
 mod overlay;
+mod performance;
 mod physics;
 mod picking;
 mod pipelines;
@@ -32,6 +37,7 @@ mod scene_mesh;
 mod simulation;
 mod startup;
 mod startup_ui;
+mod stream_metrics;
 #[cfg(test)]
 mod terrain_bench;
 mod terrain_budget;
@@ -45,9 +51,12 @@ mod ui;
 mod ui_icons;
 mod ui_menu;
 mod ui_view;
+mod upscale;
 mod view_settings;
+mod visibility;
 mod water;
 mod world;
+mod world_overlay;
 mod worldgen;
 
 use camera::Camera;
@@ -79,9 +88,12 @@ struct App {
     captured: bool,
     occluded: bool,
     vsync: bool,
+    graphics: graphics::Settings,
+    chunk_timings: bool,
+    focused: bool,
+    next_frame: Instant,
+    cpu_ms: f32,
     last_frame: Instant,
-    stats_since: Instant,
-    frames: u32,
     fps: f32,
     error: Option<String>,
 }
@@ -110,9 +122,12 @@ impl App {
             captured: false,
             occluded: false,
             vsync: true,
+            graphics: Default::default(),
+            chunk_timings: false,
+            focused: true,
+            next_frame: Instant::now(),
+            cpu_ms: 0.0,
             last_frame: Instant::now(),
-            stats_since: Instant::now(),
-            frames: 0,
             fps: 0.0,
             error: None,
         }
@@ -145,6 +160,14 @@ impl App {
         renderer.ui.spectating = self.simulation.player.mode == physics::Mode::Spectator;
         renderer.ui.grounded = self.simulation.player.grounded;
         renderer.ui.ticks = self.simulation.ticks;
+        renderer.ui.performance.frame(dt, self.cpu_ms);
+        if self.captured {
+            renderer
+                .ui
+                .performance
+                .simulation(dt, &self.simulation.tick_times);
+        }
+        self.fps = renderer.ui.performance.fps;
         let frame = match surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -158,6 +181,7 @@ impl App {
             }
             Err(wgpu::SurfaceError::Timeout) => return,
         };
+        let cpu_start = Instant::now();
         let view = frame.texture.create_view(&Default::default());
         renderer.render(
             &view,
@@ -169,17 +193,23 @@ impl App {
                 vsync: self.vsync,
             },
         );
+        self.cpu_ms = cpu_start.elapsed().as_secs_f32() * 1000.0;
+        self.graphics = renderer.graphics;
         if let Some(window) = &self.window {
             window.pre_present_notify();
         }
         frame.present();
-        self.frames += 1;
-        let interval = self.stats_since.elapsed().as_secs_f32();
-        if interval >= 0.5 {
-            self.fps = self.frames as f32 / interval;
-            self.frames = 0;
-            self.stats_since = now;
-        }
+        self.next_frame = renderer
+            .graphics
+            .interval(self.captured, self.focused)
+            .map_or(now, |interval| {
+                let scheduled = self.next_frame + interval;
+                if scheduled > now {
+                    scheduled
+                } else {
+                    now + interval
+                }
+            });
     }
 }
 impl ApplicationHandler for App {
@@ -190,10 +220,7 @@ impl ApplicationHandler for App {
         self.start_loading(event_loop);
     }
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
-        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. })
-            && (self.startup.is_some() || self.title.is_some())
-            && !self.occluded
-        {
+        if matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }) && !self.occluded {
             if let Some(window) = &self.window {
                 let size = window.inner_size();
                 if size.width > 0 && size.height > 0 {
@@ -211,7 +238,13 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => self.resize(size),
-            WindowEvent::Focused(false) => self.capture_cursor(false),
+            WindowEvent::Focused(focused) => {
+                self.focused = focused;
+                if !focused {
+                    self.capture_cursor(false);
+                }
+                self.next_frame = Instant::now();
+            }
             WindowEvent::Occluded(value) => {
                 self.occluded = value;
                 self.keys.clear();
@@ -425,7 +458,11 @@ impl ApplicationHandler for App {
             if let Some(window) = &self.window {
                 let size = window.inner_size();
                 if size.width > 0 && size.height > 0 {
-                    window.request_redraw();
+                    if Instant::now() >= self.next_frame {
+                        window.request_redraw();
+                    } else {
+                        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
+                    }
                 }
             }
         }
@@ -446,6 +483,7 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let scene = worldgen::preview::Scene::from_args(&args)?;
+    let graphics = graphics::Settings::from_args(&args)?;
     if let worldgen::preview::Scene::Noise(preview) = scene {
         if args.iter().any(|arg| arg == "--worldgen-benchmark") {
             let start = Instant::now();
@@ -510,6 +548,8 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
         return capture::capture(
             std::path::Path::new(path),
             capture::CaptureOptions {
+                chunk_timings: args.iter().any(|arg| arg == "--chunk-timings"),
+                graphics,
                 scene,
                 frames,
                 ui: args
@@ -561,6 +601,8 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(scene, args.iter().any(|arg| arg == "--seed"));
+    app.graphics = graphics;
+    app.chunk_timings = args.iter().any(|arg| arg == "--chunk-timings");
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.error {
         return Err(error.into());

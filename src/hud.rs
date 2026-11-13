@@ -193,6 +193,29 @@ pub fn font_group(
 }
 
 /// UI-only pipeline, also used before the world renderer is ready.
+pub fn font_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("shared glyph atlas layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
 pub fn pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
     let hud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("HUD shader"),
@@ -201,7 +224,13 @@ pub fn pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::Ren
     let hud_attributes = wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x4,2=>Float32x2];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("HUD"),
-        layout: None,
+        layout: Some(
+            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shared HUD glyph layout"),
+                bind_group_layouts: &[&font_layout(device)],
+                push_constant_ranges: &[],
+            }),
+        ),
         vertex: wgpu::VertexState {
             module: &hud_shader,
             entry_point: "vs_hud",

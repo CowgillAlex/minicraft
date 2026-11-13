@@ -3,6 +3,8 @@ use std::{fs::File, io::BufWriter, path::Path, sync::mpsc, time::Instant};
 
 /// Render through the same GPU pipelines without a desktop window, for validation.
 pub struct CaptureOptions<'a> {
+    pub chunk_timings: bool,
+    pub graphics: crate::graphics::Settings,
     pub scene: crate::worldgen::preview::Scene,
     pub frames: u32,
     pub ui: Option<&'a str>,
@@ -22,6 +24,8 @@ pub struct CaptureOptions<'a> {
 }
 pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     let CaptureOptions {
+        chunk_timings,
+        graphics,
         scene,
         frames,
         ui,
@@ -41,6 +45,8 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     } = options;
     let instance = wgpu::Instance::default();
     let mut renderer = pollster::block_on(Renderer::new(&instance, None, scene))?;
+    renderer.graphics = graphics;
+    renderer.ui.chunk_timings = chunk_timings;
     let (width, height) = size.unwrap_or((1280, 800));
     if !(320..=7680).contains(&width) || !(240..=4320).contains(&height) {
         return Err("Capture dimensions must be between 320x240 and 7680x4320".into());
@@ -73,8 +79,9 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
                 renderer.ui.panel = crate::ui::Panel::Settings;
                 false
             }
+            "graphics" => { renderer.ui.panel = crate::ui::Panel::Graphics; false }
             _ => return Err(
-                "--ui expects play, pause, controls, settings, view-settings, materials, or debug"
+                "--ui expects play, pause, controls, settings, graphics, view-settings, materials, or debug"
                     .into(),
             ),
         };
@@ -258,17 +265,27 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
     );
     renderer.device.poll(wgpu::Maintain::Wait);
     let start = Instant::now();
+    let mut last_frame = start;
+    let mut cpu_ms = 0.0;
     for _ in 0..frames {
+        let now = Instant::now();
+        renderer
+            .ui
+            .performance
+            .frame(now.duration_since(last_frame).as_secs_f64(), cpu_ms);
+        last_frame = now;
+        let fps = renderer.ui.performance.fps;
         renderer.render(
             &view,
             &camera,
             FrameInfo {
                 size: (width, height),
-                fps: 0.0,
+                fps,
                 captured,
                 vsync: false,
             },
         );
+        cpu_ms = now.elapsed().as_secs_f32() * 1000.0;
         renderer.device.poll(wgpu::Maintain::Wait);
     }
     println!(
@@ -279,6 +296,22 @@ pub fn capture(path: &Path, options: CaptureOptions<'_>) -> Result<()> {
         renderer.visible_triangles,
         renderer.visible_chunks
     );
+    if let Some(ms) = renderer.timings.ms {
+        for (label, ms) in crate::gpu_timing::LABELS.iter().zip(ms) {
+            println!("GPU {label}: {ms:.3} ms");
+        }
+    }
+    if chunk_timings {
+        println!(
+            "Chunk timing overlay: {} prepared labels",
+            renderer.chunk_labels_drawn()
+        );
+    }
+    if let Some(stats) = renderer.streaming_stats() {
+        if let Some(l) = stats.last {
+            println!("STREAM last region queue={:.2} geometry={:.2} light_queue={:.2} lighting={:.2} publish={:.2} upload_cpu={:.2} first_ready={:.2} all_ready={:.2} ms",l.queue_ms,l.geometry_ms,l.light_queue_ms,l.light_ms,l.publish_ms,l.upload_ms,l.first_ready_ms,l.ready_ms);
+        }
+    }
     let bytes_per_row = (width * 4).div_ceil(256) * 256;
     let buffer = renderer.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("capture readback"),

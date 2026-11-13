@@ -90,6 +90,54 @@ python3 scripts/surface-reference.py /path/to/Paper-Minecraft
 cargo test --release --locked surface_streaming_benchmark -- --ignored --nocapture
 ```
 
+## Bounded streaming pipeline
+
+The geometry coordinator and lighting stage share one cloneable sampling pool. Each execution has a private reply channel and cancellation token so stages cannot consume each other's results. Sampling concurrency retains the existing CPU budget rather than creating a worker pool per stage. Three unique region tickets bound preparation, light jobs, CPU snapshots and GPU staging. View changes preserve useful unacknowledged geometry; only successful publication acknowledges it as resident. Publication acknowledgements use a separate work counter from camera epochs, so they cannot invalidate view-tagged cache evictions.
+
+Voxel pages and data evictions are delivered in order before their mesh ticket is admitted. Page delivery remains valid when an edit or camera change rejects the geometry: the receiver reapplies its current overrides. A cancelled sampling batch stays cancelled for the entire geometry build, even if the view turns back. Local border edits retain existing neighbour meshes until their CPU pages are loaded. Collision requests refresh after half a metre of travel, before crossing a render-page boundary, even after a stationary turn cleared the forward corridor.
+
+Geometry results include packed meshes before lighting begins. The UI drains geometry, light and control events while uploads are pending, uploads nearby pages first under one per-frame 2 ms / 8 MiB budget, and can stage several regions. New-region pages become renderable when each upload and the region's correct lighting are available. Existing-region LOD/edit replacements remain atomic. No provisional light is substituted. Edits invalidate old tickets, lighting snapshots and the shared source-mesh cache; late results and cancellations cannot replace a newer ticket. Camera turns compare against the last requested direction, allowing small frame-to-frame turns to accumulate.
+
+F3 reports unscheduled regions, active geometry work, queued/active light work, staged regions and the age of the oldest outstanding request. The last completed region reports first/all render readiness. F7's R rows are shared eight-metre region timings: geometry queue wait, light queue wait/work, post-light publication delay, CPU mesh/light staging and total request-to-complete-render-ready time. These exclude display/VSync waiting. Upload work overlaps lighting, so its CPU duration is not additive to end-to-end latency. Only per-chunk Gen/Mesh remain individual two-metre worker costs. Unseen queued work is represented by the live F3 counts and age.
+
+Queued sampling jobs skip obsolete work before starting and between pages/columns/tiles. The caller polls only for cancellation while jobs are running, drains all of its own replies, and leaves other executions unaffected. Source voxel resolution, lighting transport and collision priority remain unchanged.
+
+## World chunk timing overlays
+
+F7 toggles a separate world-label renderer independently of F3. Labels identify local 32-cubed voxel pages (two metres per side) and report the latest measured generation and meshing durations. At most 16 nearby non-overlapping labels are prepared from chunks within 18 metres, with frustum and opaque-depth rejection. Text is camera-facing and drawn at native resolution after upscaling the 3D scene, using the existing font atlas. Labels disappear in menus or when H hides the HUD.
+
+Generation is measured around page generation, including density, surface rules and features. Streamed mesh timing wraps source mesh lookup/build, packing and LOD processing. Both are worker elapsed times excluding queue waiting, lighting and GPU upload. Finite/shared-buffer scenes time each chunk's greedy meshing separately. The prebuilt village has no individual generation measurements and displays n/a for them. Source cache marks a reused exact source mesh; Mesh cached reports the original recorded cost of the cached finished mesh. Regional caches retain their own timing snapshots so another LOD build cannot replace the reported cached build cost.
+
+World clones share a bounded 8192-entry timing store; starting a new world creates a new store. Recording continues while the overlay is off so enabling F7 can inspect existing chunks. No label geometry or extra GPU pass is submitted while it is off. Unknown or evicted measurements show n/a. Use `--chunk-timings` to enable the overlay at launch or in headless captures, for example:
+
+```sh
+cargo run --release --locked -- --seed 1 --finite --height 12 --chunk-timings --screenshot chunk-times.png --ui play --time 14
+```
+
+## Rendering performance and debug graphs
+
+F3 includes a 240-frame lagometer, a 240-tick execution-time graph, measured FPS/TPS, and GPU pass timings when the adapter supports encoder timestamps. Frame durations include presentation and frame-limit waiting; cyan bars show CPU wall time spent submitting the previous render frame, excluding surface acquisition. Tick bars measure `Player::tick` execution with a 50 ms budget for the 20 Hz simulation. TPS is completed ticks divided by active wall time, so catch-up limits and unavailable spawn data can reduce the reported rate. Paused time does not enter the TPS window. The graphs describe this local simulation, not network latency.
+
+GPU timings sample at most ten frames per second with a three-slot asynchronous readback ring. Rendering never waits for a timing result; a busy ring skips sampling. Unsupported adapters show an unavailable label and continue rendering. The measured stages are shadows, world/sky, SSAO, bloom, composite, water/selection, upscaling and HUD. Cached shadows have almost no work in steady frames. Set `MINICRAFT_GPU_PROFILE=1` to sample and print the latest timings in a headless capture without enabling F3.
+
+Settings > Graphics & performance controls gameplay FPS, render scale, screen AO quality, shadow resolution, bloom and terrain occlusion. Defaults keep 100% scale, high SSAO, bloom and 4096 shadows, with a 60 FPS cap. Laptop preset selects 75% scale, low SSAO, 2048 shadows and 60 FPS. Low SSAO uses eight samples and four reconstruction neighbours; high uses 24 samples and nine neighbours. Screen AO off retains baked voxel AO unless the separate global AO toggle is off. The HUD is rendered at native resolution after scaling the complete 3D scene, including transparency and selection. Settings persist across worlds for the current application session.
+
+The window uses deadline-based sleeping for frame limits, 30 FPS in world menus and 10 FPS when unfocused. Occluded/minimized windows stop requesting frames. VSync remains independent. The sky draws after opaque terrain to avoid shading covered pixels. Shadow casters use the light frustum rather than the camera frustum, preserving off-screen casters.
+
+Terrain occlusion builds a conservative 64 x 36 coverage/depth grid from up to 64 nearby solid, resident two-metre pages. A tile counts only when fully inside the projected opaque box silhouette, with the box's furthest depth. A target is rejected only when every tile touched by its bounding box is covered in front of its nearest depth. Partial pages, glass, water, near-plane crossings and uncertain coverage cannot act as blockers. The grid is rebuilt from the current view and current world every frame, including after edits, so no temporal visibility results can leave holes after a camera turn. Conservative coverage deliberately misses some culling opportunities.
+
+If a view produces no occlusion rejections, the renderer probes only once every eight frames and draws all geometry between probes. A useful probe enables testing every frame until it stops rejecting chunks. This limits CPU overhead in open views while keeping all rejection decisions tied to the current camera. An uncovered projected centre also rejects the occlusion test before transforming all eight bounding-box corners.
+
+Headless captures accept the same graphics controls:
+
+```sh
+cargo run --release --locked -- --scene village --screenshot debug.png --ui debug --frames 180
+cargo run --release --locked -- --scene village --screenshot laptop.png --laptop
+cargo run --release --locked -- --scene village --screenshot scaled.png --render-scale 75 --ao-quality low --shadow-resolution 2048
+```
+
+`--render-scale` accepts 50, 67, 75, 85 or 100. `--ao-quality` accepts off, low or high. `--shadow-resolution` accepts 1024, 2048 or 4096. `--fps-limit` accepts 0 (unlimited), 30, 45, 60, 90, 120 or 144; headless captures deliberately run without presentation pacing. `--no-bloom` and `--no-occlusion` support comparisons. `--ui graphics` captures the graphics settings panel.
+
 ## Streaming performance
 
 Version 0.16.1 evaluates conservative density intervals directly from cached interpolation fields. Raw graph evaluation remains the fallback for other graphs and boxes crossing interpolation cells. Whole-cell optical proofs also cache the surface/feature checks used by skylight and transport queries. Procedural lamp searches inspect the cottage placement lattice without building unrelated vegetation or cave recipes. These shortcuts preserve the source voxel field.
@@ -138,7 +186,7 @@ This is a rasterized mesh renderer with an editable material palette. The horizo
 
 ## Distant detail
 
-Infinite terrain has three render mesh levels. Nearby regions remain exact. Medium detail begins when the whole 8 metre region is roughly 24 metres away and permits at most half a voxel of simplification error; far detail begins around 56 metres and permits one voxel. Four metres of hysteresis prevents repeated switches near a boundary. Region uploads swap together. Page-edge vertices and material interfaces stay fixed, preserving joins between different levels. Caves, arches and overhangs keep their 3D topology. Transparent water/glass geometry and door objects are not simplified.
+Infinite terrain has three render mesh levels. Nearby regions remain exact. Medium detail begins when the whole 8 metre region is roughly 24 metres away and permits at most half a voxel of simplification error; far detail begins around 56 metres and permits one voxel. Four metres of hysteresis prevents repeated switches near a boundary. Existing-region replacements swap together; newly streamed lit pages publish progressively. Page-edge vertices and material interfaces stay fixed, preserving joins between different levels. Caves, arches and overhangs keep their 3D topology. Transparent water/glass geometry and door objects are not simplified.
 
 Meshoptimizer simplifies the opaque geometry on the terrain worker. Greedy-quad T-junctions are made conforming first, then normals, colors and corner AO contribute to the simplification error. Simplified faces use their geometric normal for lighting and shadow bias. Per-voxel color noise and corner AO fade as their footprint becomes smaller than a screen pixel; screen-space AO remains available. This avoids retaining high-contrast subpixel patterns at long distances.
 
@@ -275,7 +323,7 @@ On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, P
 ./scripts/package-windows.sh
 ```
 
-This produces `releases/v0.16.1/minicraft-v0.16.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `releases/v0.17.0/minicraft-v0.17.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing output directory. For another build of the same unreleased version, use an empty output directory, such as `./scripts/package-windows.ps1 -OutputDirectory releases/v0.17.0-chunk-overlays`. Bump the package version and release notes when starting a new release. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 

@@ -40,7 +40,9 @@ impl Gpu {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("voxel device"),
-                    required_features: wgpu::Features::empty(),
+                    required_features: adapter.features()
+                        & (wgpu::Features::TIMESTAMP_QUERY
+                            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
                     required_limits: wgpu::Limits::default(),
                 },
                 None,
