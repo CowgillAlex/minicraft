@@ -214,6 +214,8 @@ impl Occlusion {
         output: &wgpu::TextureView,
         uniforms: &wgpu::BindGroup,
         enabled: bool,
+        bloom: bool,
+        timings: &crate::gpu_timing::Timings,
     ) {
         let targets = self
             .targets
@@ -229,7 +231,11 @@ impl Occlusion {
                 &targets.ao_group,
             );
         }
-        self.bloom.render(encoder);
+        timings.stamp(encoder, 3);
+        if bloom {
+            self.bloom.render(encoder);
+        }
+        timings.stamp(encoder, 4);
         fullscreen_pass(
             encoder,
             "ambient composite",
@@ -238,6 +244,7 @@ impl Occlusion {
             uniforms,
             &targets.composite_group,
         );
+        timings.stamp(encoder, 5);
     }
 }
 fn fullscreen_pass(

@@ -31,6 +31,60 @@ pub struct SceneMesh {
     terrain: Option<terrain::Terrain>,
 }
 impl SceneMesh {
+    pub fn timing_labels(
+        &self,
+        camera: &crate::camera::Camera,
+        frustum: &Frustum,
+    ) -> Vec<crate::world_overlay::Label> {
+        let mut seen = std::collections::HashSet::new();
+        let mut candidates: Vec<_> = self
+            .batches
+            .iter()
+            .chain(&self.transparent_batches)
+            .filter_map(|b| b.chunk)
+            .filter(|key| !self.replacements.contains_key(key))
+            .chain(
+                self.replacements
+                    .iter()
+                    .filter_map(|(key, chunk)| chunk.as_ref().map(|_| *key)),
+            )
+            .filter(|key| seen.insert(*key))
+            .map(|key| {
+                (
+                    key,
+                    World::meters(key[0] * 32 + 16, key[1] * 32 + 16, key[2] * 32 + 16),
+                )
+            })
+            .filter(|(_, center)| {
+                center.distance_squared(camera.position) < 18.0 * 18.0
+                    && frustum.contains_sphere(*center, 3.0_f32.sqrt())
+            })
+            .collect();
+        candidates.sort_by(|a, b| {
+            a.1.distance_squared(camera.position)
+                .total_cmp(&b.1.distance_squared(camera.position))
+        });
+        let mut timings = self.world.chunk_timings.lock().unwrap();
+        candidates
+            .into_iter()
+            .take(128)
+            .map(|(key, center)| {
+                let toward = (camera.position - center).normalize_or_zero();
+                // Place the anchor just outside the nearest face of this chunk.
+                let extent = toward.abs().max_element();
+                let anchor = if extent > 0.0 {
+                    center + toward * (1.04 / extent)
+                } else {
+                    center
+                };
+                crate::world_overlay::Label {
+                    key,
+                    anchor,
+                    timing: timings.get(key),
+                }
+            })
+            .collect()
+    }
     #[cfg(test)]
     pub fn new(device: &wgpu::Device, world: World) -> Self {
         Self::new_with_progress(device, world, &crate::startup::Progress::default())
@@ -163,6 +217,11 @@ impl SceneMesh {
             .flat_map(|&p| editing::affected_world_chunks(&self.world, p))
             .collect();
         for chunk in chunks {
+            // An adjacent page can still be streaming. Its absent CPU data is
+            // not an empty mesh: retain any visible GPU page until it is loaded.
+            if self.world.infinite && self.world.page(chunk).is_none() {
+                continue;
+            }
             let mesh = Mesh::build_chunk(&self.world, chunk);
             let replacement = gpu_chunk(device, chunk, &mesh);
             self.replacements.insert(chunk, replacement);
@@ -254,6 +313,8 @@ impl SceneMesh {
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         frustum: Option<&Frustum>,
+        visibility: Option<&crate::visibility::Visibility>,
+        lit: bool,
     ) -> (usize, usize) {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -267,6 +328,7 @@ impl SceneMesh {
                 .chunk
                 .is_some_and(|key| self.replacements.contains_key(&key))
                 || frustum.is_some_and(|f| !f.contains_sphere(batch.center, batch.radius))
+                || visibility.is_some_and(|v| v.hidden(batch.center, Vec3::splat(batch.radius)))
             {
                 continue;
             }
@@ -290,7 +352,10 @@ impl SceneMesh {
                 continue;
             }
             if let Some(indices) = &chunk.indices {
-                if frustum.is_some() {
+                if visibility.is_some_and(|v| v.hidden(chunk.center, Vec3::ONE)) {
+                    continue;
+                }
+                if lit {
                     if let Some(light) = self.light_at(chunk.center) {
                         pass.set_bind_group(2, light, &[]);
                     }
@@ -303,6 +368,25 @@ impl SceneMesh {
             }
         }
         stats
+    }
+    pub fn visibility(
+        &self,
+        matrix: glam::Mat4,
+        frustum: &Frustum,
+        eye: Vec3,
+    ) -> crate::visibility::Visibility {
+        let mut candidates: Vec<_> = self.batches.iter().filter_map(|b| b.chunk)
+            .chain(self.replacements.iter().filter_map(|(key, chunk)| chunk.as_ref().filter(|c| c.indices.is_some()).map(|_| *key)))
+            .filter(|key| matches!(self.world.page(*key), Some(crate::chunk::Chunk::Uniform(m)) if crate::world::opaque(*m)))
+            .map(|key| World::meters(key[0]*32+16,key[1]*32+16,key[2]*32+16))
+            .filter(|&center| frustum.contains_sphere(center, 3.0_f32.sqrt()))
+            .collect();
+        candidates.sort_by(|a, b| a.distance_squared(eye).total_cmp(&b.distance_squared(eye)));
+        let mut visibility = crate::visibility::Visibility::new(matrix);
+        for center in candidates.into_iter().take(64) {
+            visibility.occluder(center);
+        }
+        visibility
     }
     pub fn draw_transparent<'a>(
         &'a self,

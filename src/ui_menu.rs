@@ -54,7 +54,7 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 ("1 - 0 / Tab", "Hotbar / all materials"),
                 ("B / N", "Glass / door handle"),
                 ("- / =", "Earlier / later time"),
-                ("F1 / F3", "Controls / debug info"),
+                ("F1 / F3 / F7", "Controls / debug / chunk timings"),
                 ("H / F11", "Hide UI / fullscreen"),
                 ("R / Esc", "Reset view / world menu"),
             ];
@@ -75,6 +75,23 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
             );
         }
         Panel::View => crate::ui_view::draw(hud, layout, stats.view),
+        Panel::Graphics => {
+            hud.styled_text(
+                "Graphics & performance",
+                p.x + 26.0,
+                p.y + 26.0,
+                24.0,
+                TEXT,
+                true,
+            );
+            hud.text(
+                "Menus: 30 FPS. Background: 10 FPS.",
+                p.x + 26.0,
+                p.y + 480.0,
+                12.0,
+                MUTED,
+            );
+        }
         Panel::Settings => {
             hud.text(
                 if stats.local_time {
@@ -208,7 +225,11 @@ pub fn draw(hud: &mut Hud, layout: &Layout, ui: &UiState, stats: &OverlayStats<'
                 },
             );
         } else {
-            let label = if b.action == Action::Resume && !ui.played {
+            let graphics_label;
+            let label = if let Action::GraphicsChange(change) = b.action {
+                graphics_label = stats.graphics.label(change);
+                &graphics_label
+            } else if b.action == Action::Resume && !ui.played {
                 "Play"
             } else {
                 b.label

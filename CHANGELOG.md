@@ -4,6 +4,29 @@ Windows builds and their downloads are archived in [GitHub Releases](https://git
 
 Six builds were made between commits, so their exact source snapshots are unavailable: v0.1.0, v0.1.1, v0.1.2, v0.1.3, v0.2.0 and v0.6.1. Their release notes identify the later retained source snapshot used by the tag. The original Windows binaries are preserved unchanged.
 
+## [v0.17.0: Rendering diagnostics and safer terrain streaming](https://github.com/CowgillAlex/minicraft/releases/tag/v0.17.0)
+
+- Deliver voxel pages independently of mesh acceptance so edits/cancellation cannot leave invisible collision barriers; retain neighbour meshes while their CPU data is missing.
+- Keep geometry cancellation sticky so a partial sampling batch cannot replace a solid region with incomplete geometry.
+- Refresh collision streaming after half a metre of walking, before the player reaches an unloaded render-page boundary.
+- Pipeline geometry preparation, GPU staging and lighting through a bounded three-region window using a shared sampling pool.
+- Reprioritise gradual camera turns against the last requested view, retain useful in-flight work, and reject stale results with unique tickets.
+- Upload geometry while lighting runs; publish new lit pages progressively while keeping existing-region replacements atomic.
+- Cancel queued page work between bounded batches and drain control/light results while uploads are pending.
+- Report queue counts, pending age, stage costs, and request-to-first/all-render-ready latency in F3 and F7.
+- Add an F7 debug renderer with camera-facing labels on nearby two-metre render chunks.
+- Measure generation and meshing on workers, excluding queue waiting and GPU upload; procedural mesh timings include packing and LOD processing.
+- Distinguish source-mesh reuse and fully cached meshes, preserve cached build costs, and show missing measurements as n/a.
+- Render readable labels at native resolution, reuse the HUD font atlas, hide obscured anchors with scene depth, and limit label overlap and count.
+- Bound measurement history to 8192 chunks per world and add `--chunk-timings` for launch and capture workflows.
+
+- Add bounded frame-time and actual simulation-tick histories to F3, measured FPS/TPS, and optional asynchronous GPU pass timings.
+- Correct the FPS counter's overlapping timing windows. Limit rendering to 30 FPS in menus and 10 FPS when unfocused, with a configurable gameplay FPS limit.
+- Draw the sky after opaque geometry so depth testing rejects covered pixels.
+- Add render scale with a native-resolution HUD, low/high screen AO, bloom control, 1024/2048/4096 shadow resolutions, and a laptop preset.
+- Cull shadow casters against the light volume and conservatively reject terrain hidden by solid resident pages using the current camera.
+- Keep high-quality defaults available and preserve voxel geometry, collision, editing and lighting data.
+
 ## v0.16.1: Faster cold-region preparation
 
 - Reuse prepared density fields for conservative uniform-region checks.

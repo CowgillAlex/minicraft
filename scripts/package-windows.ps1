@@ -1,3 +1,4 @@
+param([string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
@@ -5,10 +6,10 @@ try {
     $version = [regex]::Match($manifest, '(?m)^version = "([^"]+)"').Groups[1].Value
     if (-not $version) { throw 'Could not read the package version from Cargo.toml.' }
     $name = "minicraft-v$version-windows-x64"
-    $output = Join-Path 'releases' "v$version"
+    $output = if ($OutputDirectory) { $OutputDirectory } else { Join-Path 'releases' "v$version" }
     $executable = Join-Path $output "$name.exe"
     if (Test-Path -LiteralPath $output) {
-        throw "Release directory $output already exists. Bump Cargo.toml before packaging a new build."
+        throw "Release directory $output already exists. Use an empty -OutputDirectory for an unreleased build, or bump Cargo.toml for a new release."
     }
 
     cargo build --locked --release --target x86_64-pc-windows-msvc

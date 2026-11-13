@@ -43,9 +43,10 @@ Choose a seed on the title screen or leave it blank for a random world. Terrain,
 | - / = | Move time backward / forward |
 | F6 | Toggle night vision |
 | F1 / F3 / H | Controls / debug info / hide HUD |
+| F7 | Toggle world-space chunk generation and mesh timing labels |
 | Esc | World menu and settings |
 
-Settings include ambient occlusion, VSync, distance, fog and an option to follow your local clock. F3 shows the biome and targeted block. The [development guide](docs/development.md) lists all controls and command-line options.
+Settings include render scale, screen AO quality, shadows, bloom, an FPS limit, a laptop preset, VSync, distance, fog and an option to follow your local clock. F3 shows frame/tick histories, GPU pass timings where supported, streaming queues, the biome and the targeted block. F7 shows per-chunk generation/mesh costs and region loading latency. The [development guide](docs/development.md) lists all controls and command-line options.
 
 ## Development
 

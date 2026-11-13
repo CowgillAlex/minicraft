@@ -59,6 +59,8 @@ impl App {
                 }
             }
             Event::Ready(mut renderer) => {
+                renderer.graphics = self.graphics;
+                renderer.ui.chunk_timings = self.chunk_timings;
                 renderer.ui.pointer = self.pointer;
                 println!("Startup ready in {:.2}s", startup.progress.elapsed());
                 self.renderer = Some(*renderer);
@@ -68,7 +70,7 @@ impl App {
                 }
                 self.reset_player();
                 self.last_frame = Instant::now();
-                self.stats_since = self.last_frame;
+                self.next_frame = self.last_frame;
             }
             Event::Failed(error) => {
                 self.error = Some(error);

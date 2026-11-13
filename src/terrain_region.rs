@@ -68,6 +68,9 @@ pub fn candidates(
     keys.into_iter().map(|(key, _)| key).collect()
 }
 pub struct Region {
+    pub ticket: u64,
+    pub needs_light: bool,
+    pub timing: crate::stream_metrics::WorkTiming,
     pub level: crate::terrain_lod::Level,
     pub key: Key,
     pub revision: u64,
@@ -78,7 +81,26 @@ pub struct Region {
     pub bytes: usize,
     pub field: Option<Box<LightField>>,
 }
+impl Region {
+    pub fn lighting_request(&self) -> Self {
+        Self {
+            ticket: self.ticket,
+            needs_light: self.needs_light,
+            timing: self.timing,
+            level: self.level,
+            key: self.key,
+            revision: self.revision,
+            pages: Vec::new(),
+            evicted: Vec::new(),
+            meshes: Vec::new(),
+            light: None,
+            field: None,
+            bytes: self.bytes,
+        }
+    }
+}
 struct CachedMesh {
+    timings: Vec<(Key, crate::chunk_timings::Timing)>,
     meshes: Vec<(Key, Arc<crate::gpu_vertex::PackedMesh>)>,
     gpu: usize,
     cpu: usize,
@@ -95,6 +117,7 @@ pub struct Builder<'a> {
     mesh_bytes: usize,
     tiles: crate::light_tiles::Tiles,
     pages: Option<crate::terrain_pages::Pages>,
+    page_workers: usize,
 }
 impl<'a> Builder<'a> {
     pub fn new(world: World, generator: &'a Generator, sky: Sky) -> Self {
@@ -110,7 +133,21 @@ impl<'a> Builder<'a> {
             mesh_bytes: 0,
             tiles: Default::default(),
             pages: None,
+            page_workers: std::thread::available_parallelism()
+                .map_or(1, usize::from)
+                .saturating_sub(2)
+                .clamp(1, 8),
         }
+    }
+    pub fn set_page_pool(&mut self, pages: crate::terrain_pages::Pages) {
+        self.pages = Some(pages);
+    }
+    pub fn lighting_snapshot(&mut self, world: World, cells: &[Key]) {
+        // Geometry already invalidated the shared source-mesh cache for this edit.
+        let pages = self.pages.take();
+        self.edit(&world, cells);
+        self.pages = pages;
+        self.world = world;
     }
     pub fn into_parts(self) -> (World, Sky) {
         (self.world, self.sky)
@@ -149,6 +186,9 @@ impl<'a> Builder<'a> {
         (0..4).all(|y| {
             (0..4).all(|z| {
                 (0..4).all(|x| {
+                    if (key[1] * 4 + y) * 32 >= self.world.height() {
+                        return true;
+                    }
                     self.published
                         .contains(&[key[0] * 4 + x, key[1] * 4 + y, key[2] * 4 + z])
                         && self
@@ -182,15 +222,37 @@ impl<'a> Builder<'a> {
         level: crate::terrain_lod::Level,
         cancel: impl Fn() -> bool,
     ) -> Option<Region> {
+        let region = self.prepare_geometry(key, revision, focus, level, &cancel)?;
+        self.finish_lighting(region, focus, &cancel)
+    }
+    pub fn prepare_geometry(
+        &mut self,
+        key: Key,
+        revision: u64,
+        focus: Vec3,
+        level: crate::terrain_lod::Level,
+        cancel: impl Fn() -> bool,
+    ) -> Option<Region> {
         let started = std::time::Instant::now();
+        // A view can turn away and back while a batch drains. Once a pool has
+        // cancelled any jobs, its partial output can never become a full region.
+        let stopped = std::cell::Cell::new(false);
+        let cancel = || {
+            let stop = stopped.get() || cancel();
+            stopped.set(stop);
+            stop
+        };
         let mut phases = [0.0; 4];
-        let mut local_field = None;
         let mut added = HashSet::new();
         self.ensure(key, 0, &cancel, &mut added)?;
         phases[0] = started.elapsed().as_secs_f64();
         self.clock = self.clock.wrapping_add(1);
         let (meshes, mut bytes) = if let Some(cache) = self.meshes.get_mut(&(key, level)) {
             cache.used = self.clock;
+            let mut timings = self.world.chunk_timings.lock().unwrap();
+            for &(key, timing) in &cache.timings {
+                timings.reuse(key, timing);
+            }
             (cache.meshes.clone(), cache.gpu)
         } else {
             let nonempty = (0..4).any(|y| {
@@ -216,9 +278,11 @@ impl<'a> Builder<'a> {
                 }
             }
             let pool = self.pages.get_or_insert_with(|| {
-                crate::terrain_pages::Pages::new(
+                crate::terrain_pages::Pages::with_workers(
                     self.world.noise_preview.unwrap(),
                     self.sampler.feature_plans(),
+                    self.world.chunk_timings.clone(),
+                    self.page_workers,
                 )
             });
             let mut bytes = 0;
@@ -257,6 +321,13 @@ impl<'a> Builder<'a> {
                 self.meshes.insert(
                     (key, level),
                     CachedMesh {
+                        timings: {
+                            let mut timings = self.world.chunk_timings.lock().unwrap();
+                            meshes
+                                .iter()
+                                .map(|(key, _)| (*key, timings.get(*key)))
+                                .collect()
+                        },
                         meshes: meshes.clone(),
                         gpu: bytes,
                         cpu,
@@ -273,70 +344,8 @@ impl<'a> Builder<'a> {
             d.occupied()
                 .any(|(p, _)| (0..3).all(|i| p[i] >= origin[i] && p[i] < origin[i] + CELLS))
         });
-        let light = if meshes.is_empty() && !objects {
-            None
-        } else if let Some((light, used)) = self.lights.get_mut(&key) {
-            *used = self.clock;
-            Some(light.clone())
-        } else {
-            phases[2] = started.elapsed().as_secs_f64() - phases[0] - phases[1];
-            self.pages.get_or_insert_with(|| {
-                crate::terrain_pages::Pages::new(
-                    self.world.noise_preview.unwrap(),
-                    self.sampler.feature_plans(),
-                )
-            });
-            let mut field = LightField::build_streamed(
-                &self.world,
-                origin,
-                &mut crate::light_tiles::Source::new(
-                    &self.world,
-                    &mut self.sampler,
-                    &mut self.sky,
-                    &mut self.tiles,
-                    &cancel,
-                )
-                .parallel(self.pages.as_ref().expect("terrain pool")),
-            )?;
-            let light: Arc<[u8]> = field.region_pixels(origin).into();
-            if center(key).distance(focus) < 20.0 {
-                field.prepare_edits(
-                    &mut crate::light_tiles::Source::new(
-                        &self.world,
-                        &mut self.sampler,
-                        &mut self.sky,
-                        &mut self.tiles,
-                        &cancel,
-                    )
-                    .parallel(self.pages.as_ref().unwrap()),
-                );
-                local_field = Some(Box::new(field));
-            }
-            if self.lights.len() >= 768 {
-                if let Some(old) = self
-                    .lights
-                    .iter()
-                    .min_by_key(|(_, (_, used))| *used)
-                    .map(|(key, _)| *key)
-                {
-                    self.lights.remove(&old);
-                }
-            }
-            self.lights.insert(key, (light.clone(), self.clock));
-            Some(light)
-        };
-        phases[3] = started.elapsed().as_secs_f64() - phases[..3].iter().sum::<f64>();
-        if std::env::var_os("MINICRAFT_PROFILE_STREAM").is_some() {
-            eprintln!(
-                "PROFILE {key:?} data={:.4} mesh={:.4} halo={:.4} light={:.4} total={:.4}",
-                phases[0],
-                phases[1],
-                phases[2],
-                phases[3],
-                started.elapsed().as_secs_f64()
-            );
-        }
-        if light.is_some() {
+        let needs_light = !meshes.is_empty() || objects;
+        if needs_light {
             bytes += 34_usize.pow(3) * 2;
         }
         bytes += 256;
@@ -353,17 +362,120 @@ impl<'a> Builder<'a> {
                 })
             })
             .collect();
+        let mut timing = crate::stream_metrics::WorkTiming::new(started);
+        timing.geometry_ready = std::time::Instant::now();
+        timing.data_ms = phases[0] as f32 * 1000.0;
+        timing.mesh_ms = phases[1] as f32 * 1000.0;
         Some(Region {
+            ticket: 0,
+            needs_light,
+            timing,
             level,
             key,
             revision,
             pages,
             evicted,
             meshes,
-            light,
-            field: local_field,
+            light: None,
+            field: None,
             bytes,
         })
+    }
+    pub fn finish_lighting(
+        &mut self,
+        mut region: Region,
+        focus: Vec3,
+        cancel: impl Fn() -> bool,
+    ) -> Option<Region> {
+        if cancel() {
+            return None;
+        }
+        let key = region.key;
+        self.clock = self.clock.wrapping_add(1);
+        region
+            .timing
+            .light_started
+            .get_or_insert_with(std::time::Instant::now);
+        let mut local_field = None;
+        let origin = key.map(|v| v * CELLS);
+        let light = if !region.needs_light {
+            None
+        } else if let Some((light, used)) = self.lights.get_mut(&key) {
+            *used = self.clock;
+            Some(light.clone())
+        } else {
+            self.pages.get_or_insert_with(|| {
+                crate::terrain_pages::Pages::with_workers(
+                    self.world.noise_preview.unwrap(),
+                    self.sampler.feature_plans(),
+                    self.world.chunk_timings.clone(),
+                    self.page_workers,
+                )
+            });
+            let mut field = LightField::build_streamed(
+                &self.world,
+                origin,
+                &mut crate::light_tiles::Source::new(
+                    &self.world,
+                    &mut self.sampler,
+                    &mut self.sky,
+                    &mut self.tiles,
+                    &cancel,
+                )
+                .parallel(self.pages.as_ref().expect("terrain pool")),
+            )?;
+            let light: Arc<[u8]> = field.region_pixels(origin).into();
+            if center(key).distance(focus) < 20.0 {
+                if !field.prepare_edits(
+                    &mut crate::light_tiles::Source::new(
+                        &self.world,
+                        &mut self.sampler,
+                        &mut self.sky,
+                        &mut self.tiles,
+                        &cancel,
+                    )
+                    .parallel(self.pages.as_ref().unwrap()),
+                ) {
+                    return None;
+                }
+                local_field = Some(Box::new(field));
+            }
+            if self.lights.len() >= 768 {
+                if let Some(old) = self
+                    .lights
+                    .iter()
+                    .min_by_key(|(_, (_, used))| *used)
+                    .map(|(key, _)| *key)
+                {
+                    self.lights.remove(&old);
+                }
+            }
+            self.lights.insert(key, (light.clone(), self.clock));
+            Some(light)
+        };
+        if cancel() {
+            return None;
+        }
+        region.light = light;
+        region.field = local_field;
+        region.timing.light_ready = Some(std::time::Instant::now());
+        if std::env::var_os("MINICRAFT_PROFILE_STREAM").is_some() {
+            let t = region.timing;
+            eprintln!(
+                "PROFILE {key:?} data={:.4} mesh={:.4} light={:.4} total={:.4}",
+                t.data_ms / 1000.0,
+                t.mesh_ms / 1000.0,
+                t.light_ready
+                    .unwrap()
+                    .duration_since(t.light_started.unwrap())
+                    .as_secs_f64(),
+                t.light_ready
+                    .unwrap()
+                    .duration_since(t.started)
+                    .as_secs_f64()
+            );
+        }
+        Some(region)
     }
     fn ensure(
         &mut self,
@@ -391,7 +503,12 @@ impl<'a> Builder<'a> {
         }
         if !missing.is_empty() {
             let pool = self.pages.get_or_insert_with(|| {
-                crate::terrain_pages::Pages::new(preview, self.sampler.feature_plans())
+                crate::terrain_pages::Pages::with_workers(
+                    preview,
+                    self.sampler.feature_plans(),
+                    self.world.chunk_timings.clone(),
+                    self.page_workers,
+                )
             });
             for (key, data) in pool.generate(missing, cancel) {
                 self.world.insert_page(key, data);
@@ -442,7 +559,12 @@ impl<'a> Builder<'a> {
         let preview = self.world.noise_preview.unwrap();
         if !missing.is_empty() {
             let pool = self.pages.get_or_insert_with(|| {
-                crate::terrain_pages::Pages::new(preview, self.sampler.feature_plans())
+                crate::terrain_pages::Pages::with_workers(
+                    preview,
+                    self.sampler.feature_plans(),
+                    self.world.chunk_timings.clone(),
+                    self.page_workers,
+                )
             });
             for (key, data) in pool.generate(missing, cancel) {
                 self.world.insert_page(key, data);
@@ -527,7 +649,11 @@ pub fn initial(preview: Preview, progress: &crate::startup::Progress) -> Result<
             }
         }
     }
-    let pool = crate::terrain_pages::Pages::new(preview, generator.feature_plans.clone());
+    let pool = crate::terrain_pages::Pages::with_timings(
+        preview,
+        generator.feature_plans.clone(),
+        world.chunk_timings.clone(),
+    );
     for (key, data) in pool.generate_with_progress(keys, &|| progress.check().is_err(), |count| {
         for _ in 0..count {
             progress.advance();
@@ -547,6 +673,51 @@ pub fn initial(preview: Preview, progress: &crate::startup::Progress) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editing_cancelled_mesh_batches_never_publish_or_cache_partial_regions() {
+        let generator = Generator::new(1).unwrap();
+        let mut world = World::with_height(32);
+        world.infinite = true;
+        world.noise_preview = Some(Preview {
+            height_m: 2,
+            origin: [120, 318, -20],
+            ..Default::default()
+        });
+        for z in -1..=4 {
+            for x in -1..=4 {
+                world.insert_page([x, 0, z], Chunk::Uniform(crate::world::AIR));
+            }
+        }
+        world.insert_page([0, 0, 0], Chunk::Uniform(crate::world::STONE));
+        let mut builder = Builder::new(world, &generator, Sky::default());
+        let calls = std::cell::Cell::new(0);
+        let region = builder.prepare_geometry(
+            [0; 3],
+            0,
+            center([0; 3]),
+            crate::terrain_lod::Level::Full,
+            || {
+                calls.set(calls.get() + 1);
+                // The view briefly cancels at pool entry, then becomes useful again.
+                calls.get() == 3
+            },
+        );
+        assert!(
+            region.is_none(),
+            "cancelled jobs must not turn solid terrain into an empty region"
+        );
+        assert!(builder.meshes.is_empty());
+        let rebuilt = builder
+            .prepare_geometry(
+                [0; 3],
+                1,
+                center([0; 3]),
+                crate::terrain_lod::Level::Full,
+                || false,
+            )
+            .unwrap();
+        assert!(!rebuilt.meshes.is_empty());
+    }
     #[test]
     fn cache_eviction_discards_resident_data_but_preserves_edit_overrides() {
         let generator = Generator::new(1).unwrap();

@@ -15,6 +15,9 @@ pub struct OverlayStats<'a> {
     pub ao_enabled: bool,
     pub night_vision: bool,
     pub view: crate::view_settings::ViewSettings,
+    pub graphics: crate::graphics::Settings,
+    pub gpu_ms: Option<[f32; 8]>,
+    pub gpu_supported: bool,
     pub grid: bool,
     pub local_time: bool,
     pub interaction: Option<&'a str>,
@@ -26,6 +29,7 @@ pub struct OverlayStats<'a> {
     pub lighting_pending: bool,
     pub meshes_pending: bool,
     pub terrain_full: bool,
+    pub streaming: Option<crate::stream_metrics::Snapshot>,
 }
 pub fn vertices(
     camera: &Camera,
@@ -164,6 +168,7 @@ pub fn vertices(
     }
     if ui.debug && captured {
         debug(&mut hud, camera, &stats, fps, vsync, ui);
+        crate::lagometer::draw(&mut hud, &layout, ui, &stats);
     }
     if !captured {
         crate::ui_menu::draw(&mut hud, &layout, ui, &stats, vsync);
@@ -263,10 +268,11 @@ fn debug(
     } else {
         camera.position
     };
-    let rows = [
+    let mut rows = vec![
         format!("MiniCraft v{}", env!("CARGO_PKG_VERSION")),
         format!(
-            "20 TPS / tick {} / {}",
+            "{:.1} TPS / tick {} / {}",
+            ui.performance.tps,
             ui.ticks,
             if ui.grounded {
                 "grounded"
@@ -313,11 +319,33 @@ fn debug(
             .map(|h| format!("Target {:?} / {:.2}m", h.cell, h.distance))
             .unwrap_or_else(|| "No target within 8m".into()),
     ];
+    if let Some(s) = stats.streaming {
+        rows.push(format!(
+            "Queue {} / gen {} / light {}+{} / stage {}",
+            s.queued,
+            usize::from(s.geometry_active),
+            s.light_queued,
+            usize::from(s.light_active),
+            s.staging
+        ));
+        rows.push(format!("Oldest pending request {:.0} ms", s.oldest_ms));
+        if let Some(l) = s.last {
+            rows.push(format!(
+                "Last R: queue {:.0} / light {:.0} ms",
+                l.queue_ms,
+                l.light_queue_ms + l.light_ms
+            ));
+            rows.push(format!(
+                "Ready: first {:.0} / all {:.0} ms",
+                l.first_ready_ms, l.ready_ms
+            ));
+        }
+    }
     hud.rounded_rect(
         Rect {
             x: 20.0,
             y: 60.0,
-            w: 320.0,
+            w: 420.0,
             h: rows.len() as f32 * 23.0 + 30.0,
         },
         10.0,

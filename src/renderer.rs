@@ -28,6 +28,7 @@ struct Uniforms {
     daylight: [f32; 4],
     light_color: [f32; 4],
     view: [f32; 4],
+    quality: [f32; 4],
 }
 pub struct FrameInfo {
     pub size: (u32, u32),
@@ -41,6 +42,10 @@ pub struct Renderer {
     pub queue: Arc<wgpu::Queue>,
     pub adapter_name: String,
     pub format: wgpu::TextureFormat,
+    pub graphics: crate::graphics::Settings,
+    pub timings: crate::gpu_timing::Timings,
+    upscale: crate::upscale::Upscale,
+    world_overlay: crate::world_overlay::WorldOverlay,
     pipelines: Pipelines,
     occlusion: Occlusion,
     water: crate::water::WaterDepth,
@@ -53,6 +58,8 @@ pub struct Renderer {
     uniform_group: wgpu::BindGroup,
     shadow_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
+    shadow_layout: wgpu::BindGroupLayout,
+    shadow_resolution: u32,
     scene: SceneMesh,
     lighting: LightVolume,
     pub daylight: Daylight,
@@ -76,6 +83,8 @@ pub struct Renderer {
     pub hud_enabled: bool,
     pub grid: bool,
     biome_probe: Option<crate::worldgen::BiomeProbe>,
+    occlusion_active: bool,
+    occlusion_frame: u64,
 }
 impl Renderer {
     pub async fn new(
@@ -233,7 +242,14 @@ impl Renderer {
         });
         progress.check()?;
         progress.begin(crate::startup::Stage::Ready, 0);
+        let timings = crate::gpu_timing::Timings::new(&device, &queue);
+        let upscale = crate::upscale::Upscale::new(&device, format);
+        let world_overlay = crate::world_overlay::WorldOverlay::new(&device, format);
         Ok(Self {
+            graphics: Default::default(),
+            timings,
+            upscale,
+            world_overlay,
             device,
             queue,
             adapter_name,
@@ -250,6 +266,8 @@ impl Renderer {
             uniform_group,
             shadow_group,
             shadow_view,
+            shadow_layout,
+            shadow_resolution: 4096,
             scene,
             lighting,
             daylight: Daylight::default(),
@@ -273,10 +291,62 @@ impl Renderer {
             hud_enabled: true,
             grid: false,
             biome_probe,
+            occlusion_active: true,
+            occlusion_frame: 0,
         })
     }
     pub fn world(&self) -> &World {
         &self.scene.world
+    }
+    pub fn streaming_stats(&self) -> Option<crate::stream_metrics::Snapshot> {
+        self.scene.streaming_stats()
+    }
+    pub fn chunk_labels_drawn(&self) -> usize {
+        self.world_overlay.labels_drawn
+    }
+    fn resize_shadows(&mut self) {
+        let size = self.graphics.shadows;
+        self.shadow_view = self
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("quality sun shadow map"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("quality shadow comparison"),
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        self.shadow_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("quality shadow group"),
+            layout: &self.shadow_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        self.shadow_resolution = size;
+        self.shadow_ready = false;
     }
     pub fn show_notice(&mut self, message: &'static str) {
         self.door_notice = Some((message, Instant::now()));
@@ -357,6 +427,11 @@ impl Renderer {
         }
     }
     pub fn render(&mut self, view: &wgpu::TextureView, camera: &Camera, info: FrameInfo) {
+        self.timings
+            .begin(&self.device, self.ui.debug || self.timings.profile);
+        if self.shadow_resolution != self.graphics.shadows {
+            self.resize_shadows();
+        }
         if self.daylight.sync_clock() {
             self.shadow_ready = false;
         }
@@ -381,11 +456,20 @@ impl Renderer {
             captured,
             vsync,
         } = info;
-        self.occlusion
-            .resize(&self.device, self.format, (width, height));
+        let internal = self.graphics.size((width, height));
+        self.occlusion.resize(&self.device, self.format, internal);
+        if self.graphics.scale != 100 {
+            self.upscale.resize(&self.device, self.format, internal);
+        } else {
+            self.upscale.target = None;
+        }
+        let scene_view = if self.graphics.scale != 100 {
+            &self.upscale.target.as_ref().expect("scaled scene").view
+        } else {
+            view
+        };
         let targets = self.occlusion.targets.as_ref().expect("sized AO targets");
-        self.water
-            .resize(&self.device, &targets.depth, (width, height));
+        self.water.resize(&self.device, &targets.depth, internal);
         let matrix = camera.matrix(width as f32 / height as f32);
         let (sun, power, color, daylight) = self.daylight.parameters();
         let light_matrix = if self.scene.world.infinite {
@@ -417,6 +501,12 @@ impl Renderer {
                 sun: sun.extend(power).to_array(),
                 daylight,
                 view: self.view.uniforms(),
+                quality: [
+                    self.graphics.ao as f32,
+                    f32::from(u8::from(self.graphics.bloom)),
+                    0.0,
+                    0.0,
+                ],
                 light_color: color
                     .extend(f32::from(u8::from(self.night_vision)))
                     .to_array(),
@@ -429,6 +519,16 @@ impl Renderer {
             }),
         );
         let frustum = Frustum::new(matrix).within_distance(camera.position, self.view.distance());
+        self.occlusion_frame = self.occlusion_frame.wrapping_add(1);
+        if !self.graphics.occlusion {
+            self.occlusion_active = true;
+        }
+        // When a view offers no useful occlusion, amortize discovery across
+        // eight frames. Skipped probes draw everything; cached visibility is
+        // never used to hide geometry after camera motion or edits.
+        let probe =
+            self.graphics.occlusion && (self.occlusion_active || self.occlusion_frame % 8 == 0);
+        let visibility = probe.then(|| self.scene.visibility(matrix, &frustum, camera.position));
         self.target = if captured {
             picking::cast(&self.scene.world, &self.door_meshes, camera)
         } else {
@@ -446,6 +546,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        self.timings.stamp(&mut encoder, 0);
         if !self.shadow_ready {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("cached shadows"),
@@ -463,14 +564,17 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipelines.shadow_pipeline);
             pass.set_bind_group(0, &self.uniform_group, &[]);
-            self.scene.draw(&mut pass, None);
+            let shadow_frustum = Frustum::new(light_matrix);
+            self.scene
+                .draw(&mut pass, Some(&shadow_frustum), None, false);
             for door in &self.door_meshes {
-                door.draw(&mut pass, None, false);
+                door.draw(&mut pass, Some(&shadow_frustum), false);
             }
             self.shadow_ready = true;
             self.shadow_updated = Instant::now();
             self.stream_shadows_dirty = false;
         }
+        self.timings.stamp(&mut encoder, 1);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("world and sky"),
@@ -504,21 +608,15 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_bind_group(0, &self.uniform_group, &[]);
-            pass.set_pipeline(&self.pipelines.sky_pipeline);
-            pass.set_bind_group(1, &self.shadow_group, &[]);
-            pass.set_bind_group(
-                2,
-                self.scene
-                    .sky_light_at(camera.position)
-                    .unwrap_or(&self.lighting.group),
-                &[],
-            );
-            pass.draw(0..3, 0..1);
             pass.set_pipeline(&self.pipelines.world_pipeline);
             pass.set_bind_group(1, &self.shadow_group, &[]);
             pass.set_bind_group(2, &self.lighting.group, &[]);
             (self.visible_chunks, self.visible_triangles) =
-                self.scene.draw(&mut pass, Some(&frustum));
+                self.scene
+                    .draw(&mut pass, Some(&frustum), visibility.as_ref(), true);
+            if self.graphics.occlusion {
+                self.occlusion_active = visibility.as_ref().is_some_and(|v| v.rejected.get() > 0);
+            }
             for door in &self.door_meshes {
                 pass.set_bind_group(
                     2,
@@ -533,14 +631,31 @@ impl Renderer {
                     self.visible_triangles += triangles;
                 }
             }
+            // Depth now rejects the sky underneath opaque terrain.
+            pass.set_pipeline(&self.pipelines.sky_pipeline);
+            pass.set_bind_group(
+                2,
+                self.scene
+                    .sky_light_at(camera.position)
+                    .unwrap_or(&self.lighting.group),
+                &[],
+            );
+            pass.draw(0..3, 0..1);
         }
-        self.occlusion
-            .render(&mut encoder, view, &self.uniform_group, self.ao_enabled);
+        self.timings.stamp(&mut encoder, 2);
+        self.occlusion.render(
+            &mut encoder,
+            scene_view,
+            &self.uniform_group,
+            self.ao_enabled && self.graphics.ao > 0,
+            self.graphics.bloom,
+            &self.timings,
+        );
         if self.transparency_enabled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("transparent water and glass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -584,11 +699,12 @@ impl Renderer {
                 }
             }
         }
+        let chunk_overlay = self.ui.chunk_timings && captured && self.hud_enabled;
         if self.target.is_some() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("target after AO"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: scene_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
@@ -599,7 +715,11 @@ impl Renderer {
                     view: &targets.depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Discard,
+                        store: if chunk_overlay {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
                     }),
                     stencil_ops: None,
                 }),
@@ -610,6 +730,26 @@ impl Renderer {
             pass.set_bind_group(0, &self.uniform_group, &[]);
             pass.set_vertex_buffer(0, self.selection.slice(..));
             pass.draw(0..24, 0..1);
+        }
+        self.timings.stamp(&mut encoder, 6);
+        if self.graphics.scale != 100 {
+            self.upscale.render(&mut encoder, view);
+        }
+        self.timings.stamp(&mut encoder, 7);
+        if chunk_overlay {
+            let labels = self.scene.timing_labels(camera, &frustum);
+            self.world_overlay.render(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                view,
+                &targets.depth,
+                internal,
+                &self.hud_font,
+                &labels,
+                matrix,
+                (width, height),
+            );
         }
         if self.hud_enabled {
             self.update_hud(camera, (width, height), fps, captured, vsync);
@@ -632,7 +772,10 @@ impl Renderer {
             pass.set_vertex_buffer(0, self.hud_buffer.slice(..));
             pass.draw(0..self.hud_count, 0..1);
         }
+        self.timings.stamp(&mut encoder, 8);
+        self.timings.resolve(&mut encoder);
         self.queue.submit(Some(encoder.finish()));
+        self.timings.submitted();
     }
     fn update_hud(
         &mut self,
@@ -667,6 +810,9 @@ impl Renderer {
                 ao_enabled: self.ao_enabled,
                 night_vision: self.night_vision,
                 view: self.view,
+                graphics: self.graphics,
+                gpu_ms: self.timings.ms,
+                gpu_supported: self.timings.supported(),
                 grid: self.grid,
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
@@ -678,6 +824,7 @@ impl Renderer {
                 lighting_pending: self.lighting.pending(),
                 meshes_pending: self.scene.meshes_pending(),
                 terrain_full: self.scene.terrain_full(),
+                streaming: self.scene.streaming_stats(),
             },
             &self.ui,
         );
@@ -716,3 +863,7 @@ mod infinite_render_tests;
 #[cfg(test)]
 #[path = "lod_tests.rs"]
 mod lod_tests;
+
+#[cfg(test)]
+#[path = "graphics_tests.rs"]
+mod graphics_tests;

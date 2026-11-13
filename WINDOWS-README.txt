@@ -1,7 +1,7 @@
-MINICRAFT v0.16.1
+MINICRAFT v0.17.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.16.1-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.17.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -14,6 +14,63 @@ as you move, together with new terrain and lighting. Only the spawn area
 and its small meshing border are prepared before play. Sampling runs on a
 bounded worker pool, prioritizing the view and travel direction.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
+
+STREAMING IN v0.17.0
+Voxel data is delivered independently of cancelled meshes, and border edits
+keep neighbour geometry until its data is loaded. Walking refreshes collision
+data every half metre to avoid getting stuck at an unloaded page boundary.
+Geometry preparation and lighting run as separate stages using one shared
+sampling pool. At most three regions are in flight. Mesh uploads overlap
+lighting; new pages appear as soon as their mesh and correct light are ready.
+Existing regions retain their previous geometry until replacement is complete.
+Gradual turns reprioritize against the last requested view. Obsolete queued
+page jobs cancel between bounded batches; useful in-flight work survives
+view changes. Unique tickets prevent stale results replacing newer work.
+
+F3 reports geometry queue count, active generation, queued/active lighting,
+staged regions and the oldest pending request. Last-region timings report
+first and complete render readiness, excluding display/VSync waiting.
+
+CHUNK OVERLAYS IN v0.17.0
+F7 toggles world-anchored timing labels for nearby two-metre render chunks.
+Each label identifies the local chunk coordinate and shows generation and
+mesh-build durations in milliseconds. Mesh includes packing and LOD work
+for streamed procedural chunks. Queue waiting, lighting and GPU uploads
+are excluded. Source cache means the exact source mesh was reused before
+packing/simplifying; Mesh cached shows its recorded build cost when the
+finished mesh is reused. n/a means no measurement is available, including
+per-chunk generation in the prebuilt village. These are latest recorded
+worker timings, rather than total world-loading times.
+The extra R rows describe the enclosing eight-metre streaming region:
+geometry queue wait, light queue wait, lighting work, publication delay,
+CPU upload/data-publication work and request-to-complete-render-ready time.
+CPU upload work can overlap lighting and should not be added to the total.
+Labels follow the current view, hide behind opaque terrain at their anchor,
+and remain sharp at reduced render scales. Only a limited number of nearby,
+non-overlapping labels are shown. F7 works independently of F3. Menus and
+H hide the labels. Start with --chunk-timings to enable them immediately.
+
+GRAPHICS AND DEBUG IN v0.17.0
+F3 shows frame-time and simulation-tick lagometers, measured FPS/TPS and
+GPU pass times where supported. Frame bars include VSync and frame-limit
+waiting; cyan marks CPU render submission. Tick bars measure actual physics
+execution time, with a 50ms budget for the 20 TPS simulation. These are local
+simulation timings; there is no network server or network latency graph.
+
+Esc > Settings > Graphics & performance offers render scale, screen AO
+quality, shadow resolution, bloom, FPS limit and terrain occlusion controls.
+Laptop preset uses 75% render scale, low screen AO and 2048 shadows at a
+60 FPS cap. Text and menus stay at native resolution. High quality defaults
+restores 100% scale, high AO and 4096 shadows. These settings last for the
+current application session and survive returning to the title screen.
+Menus render at up to 30 FPS, unfocused windows at 10 FPS, and minimized
+windows stop redrawing. VSync remains a separate setting.
+
+The sky renders after opaque terrain. Hidden terrain is conservatively
+culled from the current view using solid resident pages; caves, holes,
+glass, partial coverage and near-plane crossings remain visible.
+Open views back off to occasional occlusion probes when nothing can be
+rejected, drawing everything between probes to reduce CPU overhead.
 
 STREAMING IN v0.16.1
 Generation reuses prepared density bounds and groups vertical pages on workers.
