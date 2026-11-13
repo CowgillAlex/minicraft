@@ -1,4 +1,8 @@
 use super::*;
+pub(super) fn cabin_candidate(key: [i32; 2]) -> bool {
+    key[0].rem_euclid(8) == 2 && key[1].rem_euclid(8) == 3
+}
+
 pub(super) fn surface_area(sampler: &mut TerrainSampler<'_>, key: [i32; 2]) -> Vec<Primitive> {
     let mut rng = Rng::new(sampler.seed, "surface", [key[0], 0, key[1]]);
     let mut out = Vec::new();
@@ -15,8 +19,7 @@ pub(super) fn surface_area(sampler: &mut TerrainSampler<'_>, key: [i32; 2]) -> V
                 | Habitat::Pine
                 | Habitat::Snow
                 | Habitat::Savanna
-        ) && key[0].rem_euclid(8) == 2
-            && key[1].rem_euclid(8) == 3
+        ) && cabin_candidate(key)
             && rng.unit() < 0.4;
     let mut suitable = house;
     if house {

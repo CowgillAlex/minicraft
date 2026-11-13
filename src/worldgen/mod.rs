@@ -36,6 +36,7 @@ pub struct TerrainSampler<'a> {
     plan: Option<fast_density::Plan>,
     prepared_cells: [Option<([i32; 3], fast_density::Prepared)>; 16],
     uniform_cells: crate::cache::Cache<[i32; 3], Option<u8>, 16384>,
+    optical_uniform_cells: crate::cache::Cache<([i32; 3], bool, bool), Option<u8>, 16384>,
     surface: &'a surface::Surface,
     surface_cache: surface::Cache,
 }
@@ -62,6 +63,7 @@ impl Generator {
             plan: self.plan,
             prepared_cells: [None; 16],
             uniform_cells: Default::default(),
+            optical_uniform_cells: Default::default(),
             surface: &self.surface,
             surface_cache: Default::default(),
         }
@@ -122,8 +124,22 @@ impl TerrainSampler<'_> {
         self.aquifer.substance(&mut self.density, point, value)
     }
     pub fn density_fast(&mut self, point: [f64; 3]) -> f64 {
+        let value = self
+            .prepared(point, point)
+            .map_or_else(|| self.density(point), |p| p.sample(point));
+        if value.abs() < 1e-10 {
+            self.density(point)
+        } else {
+            value
+        }
+    }
+
+    fn prepared(&mut self, point: [f64; 3], max: [f64; 3]) -> Option<fast_density::Prepared> {
         let key =
             std::array::from_fn::<_, 3, _>(|i| (point[i] / [4.0, 8.0, 4.0][i]).floor() as i32);
+        if (0..3).any(|i| (max[i] / [4.0, 8.0, 4.0][i]).floor() as i32 != key[i]) {
+            return None;
+        }
         let slot = ((key[0].wrapping_mul(3) ^ key[1].wrapping_mul(5) ^ key[2].wrapping_mul(7))
             as usize)
             & 15;
@@ -133,13 +149,7 @@ impl TerrainSampler<'_> {
                 .and_then(|p| p.prepare(&mut self.density, point, point))
                 .map(|p| (key, p));
         }
-        let value =
-            self.prepared_cells[slot].map_or_else(|| self.density(point), |(_, p)| p.sample(point));
-        if value.abs() < 1e-10 {
-            self.density(point)
-        } else {
-            value
-        }
+        self.prepared_cells[slot].map(|(_, p)| p)
     }
 
     pub fn uniform_material(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<u8> {
@@ -162,19 +172,21 @@ impl TerrainSampler<'_> {
         self.uniform_raw(min, max)
     }
     fn uniform_raw(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<u8> {
-        let bounds = self.density.bounds(self.density.density.roots[0], min, max);
+        let [low, high] = if let Some(prepared) = self.prepared(min, max) {
+            prepared.bounds(min, max)
+        } else {
+            let bounds = self.density.bounds(self.density.density.roots[0], min, max);
+            [bounds.low, bounds.high]
+        };
         // Only classify well away from zero; borderline samples retain the reference path.
-        if bounds.low > 1e-9 {
+        if low > 1e-9 {
             return Some(crate::world::STONE);
         }
-        if bounds.high < -1e-9 {
+        if high < -1e-9 {
             let fluid = self.aquifer.uniform_status(&mut self.density, min, max)?;
             return (fluid.at(min[1]) == fluid.at(max[1])).then(|| fluid.at(min[1]));
         }
         None
-    }
-    fn prepared(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<fast_density::Prepared> {
-        self.plan?.prepare(&mut self.density, min, max)
     }
     fn open_fluid(&mut self, min: [f64; 3], max: [f64; 3]) -> Option<aquifer::Fluid> {
         self.aquifer.uniform_status(&mut self.density, min, max)

@@ -286,11 +286,9 @@ impl<'a> Builder<'a> {
                     self.sampler.feature_plans(),
                 )
             });
-            let low = origin.map(|v| v - 128);
-            let mut field = LightField::build_sampled(
+            let mut field = LightField::build_streamed(
                 &self.world,
-                low,
-                [96; 3],
+                origin,
                 &mut crate::light_tiles::Source::new(
                     &self.world,
                     &mut self.sampler,
@@ -300,7 +298,7 @@ impl<'a> Builder<'a> {
                 )
                 .parallel(self.pages.as_ref().expect("terrain pool")),
             )?;
-            let light: Arc<[u8]> = field.crop([31; 3], [34; 3]).into();
+            let light: Arc<[u8]> = field.region_pixels(origin).into();
             if center(key).distance(focus) < 20.0 {
                 field.prepare_edits(
                     &mut crate::light_tiles::Source::new(
@@ -520,20 +518,24 @@ pub fn initial(preview: Preview, progress: &crate::startup::Progress) -> Result<
     world.spawn = Some(position);
     let region = key(position - Vec3::Y * 0.125);
     progress.begin(crate::startup::Stage::Terrain, 216);
-    let mut sampler = generator.sampler();
+    let mut keys = Vec::new();
     for cy in (region[1] * 4 - 1).max(0)..(region[1] * 4 + 5).min(world.chunks_y() as i32) {
         for cz in region[2] * 4 - 1..region[2] * 4 + 5 {
             for cx in region[0] * 4 - 1..region[0] * 4 + 5 {
                 progress.check()?;
-                let key = [cx, cy, cz];
-                let data =
-                    crate::worldgen::page::generate(preview, &mut sampler, key.map(|v| v * 32))
-                        .data;
-                world.insert_page(key, data);
-                progress.advance();
+                keys.push([cx, cy, cz]);
             }
         }
     }
+    let pool = crate::terrain_pages::Pages::new(preview, generator.feature_plans.clone());
+    for (key, data) in pool.generate_with_progress(keys, &|| progress.check().is_err(), |count| {
+        for _ in 0..count {
+            progress.advance();
+        }
+    }) {
+        world.insert_page(key, data);
+    }
+    progress.check()?;
     println!(
         "Infinite spawn prepared at {:?}, {:.1} MiB resident voxel data",
         position,

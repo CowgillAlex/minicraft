@@ -275,6 +275,81 @@ mod tests {
     use super::*;
     use crate::worldgen::{preview::Preview, Generator};
     #[test]
+    fn adaptive_skylight_halo_matches_full_light_bricks() {
+        for (seed, key, features) in [
+            (1, [0, 15, 2], false),
+            (8349847389, [10, 16, 3], true),
+            (1794358123416304200, [-225, 16, -257], true),
+            (-67, [-21, 2, 6], true),
+        ] {
+            let preview = Preview {
+                seed,
+                origin: [0, -64, 0],
+                surfaces: true,
+                features,
+                ..Default::default()
+            };
+            let generator = Generator::new(seed).unwrap();
+            let mut world = World::with_height(384 * 16);
+            world.infinite = true;
+            world.noise_preview = Some(preview);
+            let pool = crate::terrain_pages::Pages::new(preview, generator.feature_plans.clone());
+            let mut sampler = generator.sampler();
+            let mut sky = Sky::default();
+            let mut tiles = Tiles::default();
+            let origin = key.map(|v| v * 128);
+            let adaptive = light_field::LightField::build_streamed(
+                &world,
+                origin,
+                &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false)
+                    .parallel(&pool),
+            )
+            .unwrap();
+            if !features {
+                assert_eq!(adaptive.size(), [70; 3]);
+            }
+            let full = light_field::LightField::build_sampled(
+                &world,
+                origin.map(|v| v - 128),
+                [96; 3],
+                &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false)
+                    .parallel(&pool),
+            )
+            .unwrap();
+            assert_eq!(
+                adaptive.region_pixels(origin),
+                full.crop([31; 3], [34; 3]),
+                "seed {seed} region {key:?}"
+            );
+            if !features {
+                // A new lamp outside the small graph still reaches the output.
+                let lamp = [origin[0] - 90, origin[1] + 66, origin[2] + 66];
+                world.set(lamp[0], lamp[1], lamp[2], world::LIGHT);
+                assert!(adaptive.needs_lamp_halo(&world, origin));
+                sky.invalidate(&[lamp]);
+                tiles.invalidate(&[lamp]);
+                let expanded = light_field::LightField::build_streamed(
+                    &world,
+                    origin,
+                    &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false)
+                        .parallel(&pool),
+                )
+                .unwrap();
+                assert_eq!(expanded.size(), [96; 3]);
+                let full = light_field::LightField::build_sampled(
+                    &world,
+                    origin.map(|v| v - 128),
+                    [96; 3],
+                    &mut Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false)
+                        .parallel(&pool),
+                )
+                .unwrap();
+                assert_eq!(expanded.region_pixels(origin), full.crop([31; 3], [34; 3]));
+            }
+        }
+    }
+
+    #[test]
     fn sparse_transport_matches_fine_rays_with_edits_and_missing_pages() {
         let preview = Preview {
             origin: [134, 20, -37],

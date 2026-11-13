@@ -2,7 +2,7 @@
 
 Run the commands in this guide from the repository root.
 
-A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.16.0 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`.
+A native Rust voxel renderer. Voxels are 1/16 metre across; a metre-sized block contains 16 × 16 × 16 voxels. Version 0.16.1 streams an infinite horizontal world with biome-driven surface materials across the full 384 metre vertical range. The previous village scene remains available with `--scene village`.
 
 ## System dependencies
 
@@ -92,6 +92,14 @@ cargo test --release --locked surface_streaming_benchmark -- --ignored --nocaptu
 
 ## Streaming performance
 
+Version 0.16.1 evaluates conservative density intervals directly from cached interpolation fields. Raw graph evaluation remains the fallback for other graphs and boxes crossing interpolation cells. Whole-cell optical proofs also cache the surface/feature checks used by skylight and transport queries. Procedural lamp searches inspect the cottage placement lattice without building unrelated vegetation or cave recipes. These shortcuts preserve the source voxel field.
+
+Lamp-free regions bake a 70³ lighting graph instead of 96³. Skylight loses 14 units per quarter-metre step, so only 18 steps can carry positive light into the 34³ output brick. External lamps retain the 31-step lamp halo. Lamps inside the output region cannot leave the smaller halo and return within their falloff range. Adding an external lamp near a cached smaller graph rebuilds it with the larger halo before publishing the edit; subsequent edits reuse that graph. Filtering borders and voxel-accurate transport remain unchanged.
+
+Vertical page batches reuse worker-local column scans, with at most four pages per job to bound cancelled work. The initial spawn uses the same worker pool and reports completed batches. Concurrent requests for one feature plan share its initialization while independent keys can generate together. Surface and feature passes detach copy-on-write storage once per page and update occupancy after bulk writes. Coordinate caches use integer hashing. The worker pool leaves two logical CPUs available when possible, capped at eight workers.
+
+On the Windows i5-1135G7 development machine, three runs of the decorated-flight CPU survey recorded cold-region maxima of 1.61s (forest), 3.53s (savanna), and 3.46s (aquifer surface). Six of the nine fixed cold/adjacent cases stayed below the 2s target in every run; the slowest adjacent case was 2.35s. These test builds used release optimization, thin LTO and 16 codegen units. The packaged game retains its normal one-codegen-unit release profile. These measurements include terrain, meshing and lighting for an 8m region, exclude cached returns, and do not establish a universal latency ceiling.
+
 Version 0.16 uses optical feature queries for lighting. Half-metre shape bins retain exact fine-voxel coverage and replacement priority; lighting no longer rasterizes whole feature pages or generates mineral deposits to inspect a point. Uniform base pages reuse exact material proofs. Workers share immutable deterministic surface/cave/ore plans, while bounded second-chance caches retain recent sampling, lighting and feature data instead of resetting wholesale.
 
 Surface rules are specialized by biome. Constant results over contiguous stone spans are applied together; uncertain spans split down to literal voxel evaluation. The nearest-climate index uses conservative range bounds and original table indices to preserve ties. Biome sampling still uses the existing four-metre grid.
@@ -111,7 +119,7 @@ A single-run CPU survey on the development host reduced cold decorated region pr
 - Sparse allocation of 32³-voxel chunks. A uniform chunk stores one material value; a mixed chunk uses one byte per voxel. Editing a uniform chunk expands it. Dense chunks use copy-on-write storage so lighting and mesh workers can read a consistent snapshot.
 - Bitwise visibility masks reject hidden faces before AO and greedy merging. Material and AO merge rules are unchanged. Enclosed uniform water and glass pages are skipped alongside solid pages.
 - GPU vertices use 28 bytes instead of 64. Positions retain full float precision; normals, palette colors, AO and UVs use normalized integer formats. Doors retain float geometry for transforms; streamed static meshes are packed on the worker and cached in their GPU format.
-- Infinite worlds use signed 2 metre compressed pages and 8 metre work regions. One background actor prioritizes the nearby body, view direction and travel direction. It coalesces requests and cancels obsolete work. A persistent pool of up to four sampling workers leaves two logical CPUs available when possible, and sends results through bounded queues. Generation, meshing and light baking stay off the window event loop. Cached meshes carry their LOD, so approaching a region upgrades its detail and moving away can reduce it. GPU uploads have a 2 ms / 8 MiB per-frame budget; a completed region swaps in together. A swept collision corridor extends 8 metres along travel and publishes its fine pages before visual work, so movement need not wait for lighting. Opaque draw order is cached between page movement or geometry changes.
+- Infinite worlds use signed 2 metre compressed pages and 8 metre work regions. One background actor prioritizes the nearby body, view direction and travel direction. It coalesces requests and cancels obsolete work. A persistent pool of up to eight sampling workers leaves two logical CPUs available when possible, and sends results through bounded queues. Generation, meshing and light baking stay off the window event loop. Cached meshes carry their LOD, so approaching a region upgrades its detail and moving away can reduce it. GPU uploads have a 2 ms / 8 MiB per-frame budget; a completed region swaps in together. A swept collision corridor extends 8 metres along travel and publishes its fine pages before visual work, so movement need not wait for lighting. Opaque draw order is cached between page movement or geometry changes.
 - Generated voxel data and estimated page metadata have a 512 MiB cache budget. GPU meshes and light textures have a separate 512 MiB budget. Nearby collision and lighting data are protected, so these are soft working-set limits rather than a process memory cap. Mesh admission uses the current view and travel direction: higher-priority regions can evict lower-priority ones even when both remain inside render distance. Turning no longer leaves useful cave regions permanently blocked by older cached meshes. The worker also caches up to 256 MiB of CPU meshes and 768 light bricks for return trips. Player edits and door objects are retained separately in RAM. Walking and flight stop at unloaded pages; spectator can move ahead of generation. Reset waits for spawn data before resuming physics.
 - Per-chunk GPU buffers are sorted front to back and frustum culled. The default render distance is 24 metres, with a 4 metre loading margin. Distance & fog offers 12, 16, 24, 32, 48, 64, 96, 128, 192 and 256 metres. Changing distance requests or evicts regions without requiring movement or restart. Distance culling is independent of fog. Fully buried chunks need no mesh. Finite previews retain their existing mesh worker; the short finite preview and village use shared buffers with per-chunk edit replacements. Edits remesh touched chunks and neighbors whose faces or corner AO may change.
 - A cached 4096² directional shadow map with hardware-filtered comparison sampling. A conservative depth bias bounds the full filter footprint using geometric face normals, avoiding triangle-shaped self-shadow bands. The per-frame shadow lookup uses one filtered comparison rather than nine manual taps. In infinite worlds its projection follows the camera in snapped 8 metre steps. The map is reused until the projection, time, geometry or door motion invalidates it. Mesh-stream arrivals coalesce shadow refreshes to at most eight per second; edits and time/door changes still refresh immediately. Fully sky-occluded full-height surfaces skip sun-shadow sampling, and dark water skips sky reflection work.
@@ -253,13 +261,21 @@ The fixed CPU streaming benchmark prepares four adjacent 8 metre regions at the 
 
 ## Windows builds
 
+On Windows, install Rust's MSVC toolchain and Visual Studio C++ Build Tools with the Windows SDK. Run from a Developer PowerShell with `rc.exe` on PATH:
+
+```powershell
+./scripts/package-windows.ps1
+```
+
+The native Windows build embeds the C/C++ runtime so no separate runtime installer is needed.
+
 On Linux, install Rust's `x86_64-pc-windows-gnu` target and the MinGW x64 GCC, POSIX G++ and binutils packages (`g++-mingw-w64-x86-64-posix` on Debian/Ubuntu). Then run from the repository root:
 
 ```sh
 ./scripts/package-windows.sh
 ```
 
-This produces `releases/v0.16.0/minicraft-v0.16.0-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
+This produces `releases/v0.16.1/minicraft-v0.16.1-windows-x64.exe`, a ZIP with controls, and a SHA-256 checksum. The version comes from Cargo.toml and appears in the filename, window title, HUD, and Windows file-version resource. The package script refuses to overwrite an existing release. Bump the package version and release notes for subsequent builds. Builds are unsigned. Windows uses a GUI subsystem, with startup errors shown in a message box and written beside the executable.
 
 The UI atlas and metrics are checked in. To regenerate them on Linux, install Pillow and DejaVu Sans, then run `python3 scripts/bake-ui-font.py`. The font license is in `assets/FONT-LICENSE.txt`, embedded in the app, and included in Windows ZIP packages. `--licenses` prints the font and third-party notices. Meshopt/meshoptimizer notices are embedded and included as `THIRD-PARTY-LICENSES.txt` in Windows ZIP packages.
 

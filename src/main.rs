@@ -231,13 +231,12 @@ impl ApplicationHandler for App {
                         MouseButton::Left => {
                             renderer.edit(&self.camera, false);
                         }
-                        MouseButton::Right => {
+                        MouseButton::Right
                             if renderer
                                 .target_cell(&self.camera, true)
-                                .is_some_and(|cell| !self.simulation.blocks_placement(cell))
-                            {
-                                renderer.edit(&self.camera, true);
-                            }
+                                .is_some_and(|cell| !self.simulation.blocks_placement(cell)) =>
+                        {
+                            renderer.edit(&self.camera, true);
                         }
                         MouseButton::Middle => renderer.pick_material(&self.camera),
                         _ => {}

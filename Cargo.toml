@@ -1,6 +1,6 @@
 [package]
 name = "minicraft"
-version = "0.16.0"
+version = "0.16.1"
 edition = "2021"
 description = "A native voxel world explorer with 1/16-metre voxels"
 
@@ -15,6 +15,7 @@ png = "0.17"
 serde_json = "1"
 md5 = "0.8"
 meshopt = "0.7.0"
+rustc-hash = "1.1"
 
 [profile.release]
 lto = "thin"

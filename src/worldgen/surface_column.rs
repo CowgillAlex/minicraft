@@ -67,9 +67,21 @@ impl Cache {
         origin: [i32; 3],
         data: &mut Chunk,
     ) {
+        if matches!(data, Chunk::Uniform(m) if *m != STONE) {
+            return;
+        }
+        data.with_cells_mut(|cells| self.decorate_cells(surface, sampler, origin, cells));
+    }
+    fn decorate_cells(
+        &mut self,
+        surface: &Surface,
+        sampler: &mut TerrainSampler<'_>,
+        origin: [i32; 3],
+        cells: &mut [u8],
+    ) {
         for z in 0..32 {
             for x in 0..32 {
-                if !(0..32).any(|y| data.get(x + 32 * (z + 32 * y)) == STONE) {
+                if !(0..32).any(|y| cells[x + 32 * (z + 32 * y)] == STONE) {
                     continue;
                 }
                 let key = [origin[0] + x as i32, origin[2] + z as i32];
@@ -85,14 +97,14 @@ impl Cache {
                     };
                     let mut y = 31_i32;
                     while y >= 0 {
-                        if data.get(x + 32 * (z + 32 * y as usize)) != STONE {
+                        if cells[x + 32 * (z + 32 * y as usize)] != STONE {
                             y -= 1;
                             continue;
                         }
                         let top = y;
                         let band = (origin[1] + top + 1024).div_euclid(64);
                         while y > 0
-                            && data.get(x + 32 * (z + 32 * (y - 1) as usize)) == STONE
+                            && cells[x + 32 * (z + 32 * (y - 1) as usize)] == STONE
                             && (origin[1] + y - 1 + 1024).div_euclid(64) == band
                         {
                             y -= 1;
@@ -102,7 +114,7 @@ impl Cache {
                         paint_span(
                             &surface.by_biome[id as usize],
                             &mut context,
-                            data,
+                            cells,
                             [x, z],
                             origin[1],
                             y,
@@ -114,7 +126,6 @@ impl Cache {
                 self.columns.insert(key, column);
             }
         }
-        data.compact();
     }
     pub fn material(
         &mut self,
@@ -434,7 +445,7 @@ fn water_top(sampler: &mut TerrainSampler<'_>, key: Xz, mut y: i32) -> Option<f6
 fn paint_span(
     rule: &crate::worldgen::surface_rules::Rule,
     context: &mut Context<'_, '_>,
-    data: &mut Chunk,
+    cells: &mut [u8],
     [x, z]: [usize; 2],
     origin: i32,
     low: i32,
@@ -445,17 +456,17 @@ fn paint_span(
     if let Some(material) = uniform {
         if let Some(m) = material.filter(|&m| m != STONE) {
             for y in low..=high {
-                data.set(x + 32 * (z + 32 * y as usize), m);
+                cells[x + 32 * (z + 32 * y as usize)] = m;
             }
         }
     } else if low == high {
         if let Some(m) = rule.apply(context).filter(|&m| m != STONE) {
-            data.set(x + 32 * (z + 32 * low as usize), m);
+            cells[x + 32 * (z + 32 * low as usize)] = m;
         }
     } else {
         let mid = (low + high) / 2;
-        paint_span(rule, context, data, [x, z], origin, mid + 1, high);
-        paint_span(rule, context, data, [x, z], origin, low, mid);
+        paint_span(rule, context, cells, [x, z], origin, mid + 1, high);
+        paint_span(rule, context, cells, [x, z], origin, low, mid);
     }
 }
 

@@ -4,6 +4,17 @@ Windows builds and their downloads are archived in [GitHub Releases](https://git
 
 Six builds were made between commits, so their exact source snapshots are unavailable: v0.1.0, v0.1.1, v0.1.2, v0.1.3, v0.2.0 and v0.6.1. Their release notes identify the later retained source snapshot used by the tag. The original Windows binaries are preserved unchanged.
 
+## v0.16.1: Faster cold-region preparation
+
+- Reuse prepared density fields for conservative uniform-region checks.
+- Group vertical pages on workers to reuse fine-column surface scans, and generate the initial spawn in parallel.
+- Apply surface and feature materials in bulk without per-voxel copy-on-write checks.
+- Cache whole-cell optical proofs and coordinate concurrent requests for the same feature plan.
+- Size lamp-free lighting halos to the exact skylight falloff range, expanding cached graphs when a lamp is added.
+- Search the cottage placement lattice for procedural lamps without generating unrelated vegetation or cave recipes.
+- Use fast hashing for internal coordinate caches and scale the worker pool while leaving two logical CPUs available.
+- Support native Windows packaging with the Microsoft toolchain and an embedded runtime.
+
 ## [v0.16.0: Faster terrain streaming](https://github.com/CowgillAlex/minicraft/releases/tag/v0.16.0)
 
 - Give lighting its own exact feature-shape queries, without rasterizing full pages or generating ore deposits.

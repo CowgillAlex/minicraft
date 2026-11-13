@@ -60,14 +60,23 @@ pub struct Overlay {
 }
 impl Overlay {
     pub fn apply(&self, data: &mut Chunk) {
-        for &(i, paint) in &self.cells {
-            let base = data.get(i as usize);
-            let m = geometry::apply(paint, base);
-            if m != base {
-                data.set(i as usize, m);
+        if self.cells.is_empty() {
+            return;
+        }
+        if let Chunk::Uniform(base) = data {
+            if self
+                .cells
+                .iter()
+                .all(|&(_, paint)| geometry::apply(paint, *base) == *base)
+            {
+                return;
             }
         }
-        data.compact();
+        data.with_cells_mut(|cells| {
+            for &(i, paint) in &self.cells {
+                cells[i as usize] = geometry::apply(paint, cells[i as usize]);
+            }
+        });
     }
     #[cfg(test)]
     pub fn at(&self, index: usize, base: u8) -> u8 {
@@ -77,6 +86,21 @@ impl Overlay {
     }
 }
 impl Cache {
+    fn surface_plan(
+        &mut self,
+        sampler: &mut TerrainSampler<'_>,
+        key: [i32; 2],
+    ) -> Arc<Vec<Primitive>> {
+        if let Some(plan) = self.areas.get(&key) {
+            return plan.clone();
+        }
+        let plan = self
+            .shared
+            .get_or_insert_with(Default::default)
+            .area(sampler, key);
+        self.areas.insert(key, plan.clone());
+        plan
+    }
     pub(crate) fn new(shared: Arc<Shared>) -> Self {
         Self {
             shared: Some(shared),
@@ -134,16 +158,7 @@ impl Cache {
         for z in ((min[2] - 8.) / 8.).floor() as i32..=((max[2] + 8.) / 8.).floor() as i32 {
             for x in ((min[0] - 8.) / 8.).floor() as i32..=((max[0] + 8.) / 8.).floor() as i32 {
                 let k = [x, z];
-                let recipes = if let Some(p) = self.areas.get(&k) {
-                    p.clone()
-                } else {
-                    let p = self
-                        .shared
-                        .get_or_insert_with(Default::default)
-                        .area(sampler, k);
-                    self.areas.insert(k, p.clone());
-                    p
-                };
+                let recipes = self.surface_plan(sampler, k);
                 for primitive in recipes.iter() {
                     if intersects(primitive, min, max) {
                         selected.push(*primitive);
@@ -214,31 +229,32 @@ impl Cache {
         max: [f64; 3],
     ) -> Vec<[i32; 3]> {
         let mut result = std::collections::BTreeSet::new();
-        let lo = min.map(|v| (v / 8.).floor() as i32);
-        let hi = max.map(|v| (v / 8.).floor() as i32);
-        for y in lo[1]..=hi[1] {
-            for z in lo[2]..=hi[2] {
-                for x in lo[0]..=hi[0] {
-                    for p in self
-                        .block(sampler, [x, y, z], true)
-                        .iter()
-                        .filter(|p| p.material == LIGHT)
-                    {
-                        let (a, b) = p.bounds();
-                        let a = (a * 16.).floor().as_ivec3().to_array();
-                        let b = (b * 16.).ceil().as_ivec3().to_array();
-                        for yy in a[1]..b[1] {
-                            for zz in a[2]..b[2] {
-                                for xx in a[0]..b[0] {
-                                    let c = [xx, yy, zz];
-                                    let v = (V::new(xx as f64, yy as f64, zz as f64)
-                                        + V::splat(0.5))
-                                        / 16.;
-                                    if (0..3).all(|i| v[i] >= min[i] && v[i] <= max[i])
-                                        && p.contains(v)
-                                    {
-                                        result.insert(c);
-                                    }
+        // Only cottages emit in the current recipes. Search their placement
+        // lattice directly; a lamp query must not generate every tree, plant
+        // and cave feature in a large lighting halo.
+        for z in ((min[2] - 8.) / 8.).floor() as i32..=((max[2] + 8.) / 8.).floor() as i32 {
+            for x in ((min[0] - 8.) / 8.).floor() as i32..=((max[0] + 8.) / 8.).floor() as i32 {
+                let key = [x, z];
+                if !placement::cabin_candidate(key) && !self.areas.contains_key(&key) {
+                    continue;
+                }
+                for p in self
+                    .surface_plan(sampler, key)
+                    .iter()
+                    .filter(|p| p.material == LIGHT)
+                {
+                    let (a, b) = p.bounds();
+                    let a = (a * 16.).floor().as_ivec3().to_array();
+                    let b = (b * 16.).ceil().as_ivec3().to_array();
+                    for yy in a[1]..b[1] {
+                        for zz in a[2]..b[2] {
+                            for xx in a[0]..b[0] {
+                                let c = [xx, yy, zz];
+                                let v =
+                                    (V::new(xx as f64, yy as f64, zz as f64) + V::splat(0.5)) / 16.;
+                                if (0..3).all(|i| v[i] >= min[i] && v[i] <= max[i]) && p.contains(v)
+                                {
+                                    result.insert(c);
                                 }
                             }
                         }
