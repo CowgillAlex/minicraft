@@ -4,6 +4,16 @@ Windows builds and their downloads are archived in [GitHub Releases](https://git
 
 Six builds were made between commits, so their exact source snapshots are unavailable: v0.1.0, v0.1.1, v0.1.2, v0.1.3, v0.2.0 and v0.6.1. Their release notes identify the later retained source snapshot used by the tag. The original Windows binaries are preserved unchanged.
 
+## [v0.18.0: Stone UI and editable hotbar](https://github.com/CowgillAlex/minicraft/releases/tag/v0.18.0)
+
+- Restyle every menu with square bevelled stone panels and buttons, hard text shadows and a shared style module.
+- Use switches for every on/off option, show cycling graphics values with an arrow, and add arrows to buttons that open another page.
+- Draw the Controls page keys as keycaps and put Distance & fog values in recessed boxes between the − and + buttons.
+- Give the title screen a dusk sky, blocky hills and a large logo, with the seed form inside a stone panel.
+- Replace the HUD's corner labels with a top-right clock showing movement mode, speed and status; draw the hotbar as angled slots and hide it while menus are open.
+- Turn the material picker into an inventory: clicking a block fills the selected hotbar slot (or selects the slot that already holds it), the hotbar is shown and selectable inside it, blocks show their hotbar key, names appear on hover, and pages are numbered.
+- B and N now select hotbar slots 11 and 12, which still default to Glass and Handle; middle-click picking follows the inventory rule.
+
 ## [v0.17.0: Rendering diagnostics and safer terrain streaming](https://github.com/CowgillAlex/minicraft/releases/tag/v0.17.0)
 
 - Deliver voxel pages independently of mesh acceptance so edits/cancellation cannot leave invisible collision barriers; retain neighbour meshes while their CPU data is missing.

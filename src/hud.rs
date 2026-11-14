@@ -60,6 +60,19 @@ impl Hud {
             }
         }
     }
+    pub fn gradient_rect(&mut self, r: crate::ui::Rect, top: [f32; 4], bottom: [f32; 4]) {
+        let (x0, y0, x1, y1) = (r.x, r.y, r.x + r.w, r.y + r.h);
+        for (p, c) in [
+            ([x0, y0], top),
+            ([x1, y0], top),
+            ([x1, y1], bottom),
+            ([x0, y0], top),
+            ([x1, y1], bottom),
+            ([x0, y1], bottom),
+        ] {
+            self.vertex(p, c, WHITE);
+        }
+    }
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
         self.polygon(&[[x, y], [x + w, y], [x + w, y + h], [x, y + h]], color);
     }

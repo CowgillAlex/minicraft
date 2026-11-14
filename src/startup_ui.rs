@@ -24,7 +24,7 @@ impl LoadingScreen {
         let font = crate::hud::font_group(&gpu.device, &gpu.queue, &pipeline)?;
         let vertices = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("loading UI vertices"),
-            size: 256_000,
+            size: 1_000_000,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -84,10 +84,9 @@ fn vertices(size: (u32, u32), progress: &Progress) -> Vec<HudVertex> {
     let scale = (size.1 as f32 / 900.0).clamp(0.85, 1.4);
     let (width, height) = (size.0 as f32 / scale, size.1 as f32 / scale);
     let mut hud = Hud::new(width, height);
-    let white = [0.94, 0.95, 0.93, 1.0];
-    let muted = [0.57, 0.63, 0.64, 1.0];
-    let mint = [0.64, 0.84, 0.69, 1.0];
-    hud.styled_text("MiniCraft", 28.0, 26.0, 18.0, white, true);
+    use crate::ui_style as style;
+    let (white, muted, mint) = (style::TEXT, style::MUTED, style::ACCENT);
+    style::text(&mut hud, "MiniCraft", 28.0, 26.0, 18.0, white, true);
     hud.text(
         &format!("v{}", env!("CARGO_PKG_VERSION")),
         28.0,
@@ -111,30 +110,44 @@ fn vertices(size: (u32, u32), progress: &Progress) -> Vec<HudVertex> {
         .map(|i| format!("{} / 4", i + 1))
         .unwrap_or_default();
     hud.text(&step, x, y - 31.0, 11.0, muted);
-    hud.styled_text(snapshot.stage.label(), x, y, 22.0, white, true);
+    style::text(&mut hud, snapshot.stage.label(), x, y, 22.0, white, true);
+    let well = Rect {
+        x: x - 3.0,
+        y: y + 39.0,
+        w: w + 6.0,
+        h: 18.0,
+    };
+    hud.rect(
+        well.x - 2.0,
+        well.y - 2.0,
+        well.w + 4.0,
+        well.h + 4.0,
+        style::OUTLINE,
+    );
+    style::well(&mut hud, well);
     let bar = Rect {
         x,
-        y: y + 44.0,
+        y: y + 42.0,
         w,
-        h: 5.0,
+        h: 12.0,
     };
-    hud.rounded_rect(bar, 2.5, [0.15, 0.19, 0.20, 1.0]);
     if snapshot.total > 0 {
         let ratio = snapshot.completed as f32 / snapshot.total as f32;
         if ratio > 0.0 {
-            hud.rounded_rect(
+            style::bevel(
+                &mut hud,
                 Rect {
-                    w: w * ratio,
+                    w: (w * ratio).max(4.0),
                     ..bar
                 },
-                2.5,
-                mint,
+                style::PRIMARY,
+                2.0,
             );
         }
         hud.text(
             &format!("{} / {} pages", snapshot.completed, snapshot.total),
             x,
-            y + 66.0,
+            y + 68.0,
             12.0,
             muted,
         );
@@ -142,21 +155,22 @@ fn vertices(size: (u32, u32), progress: &Progress) -> Vec<HudVertex> {
         hud.text(
             &percent,
             x + w - Hud::text_width(&percent, 12.0, false),
-            y + 66.0,
+            y + 68.0,
             12.0,
             muted,
         );
     } else {
         let t = (elapsed * 0.6).fract();
         let span = w * 0.2;
-        hud.rounded_rect(
+        style::bevel(
+            &mut hud,
             Rect {
                 x: x + (w - span) * (0.5 - 0.5 * (t * std::f32::consts::TAU).cos()),
                 w: span,
                 ..bar
             },
-            2.5,
-            mint,
+            style::PRIMARY,
+            2.0,
         );
     }
     for (index, stage) in stages.iter().enumerate() {

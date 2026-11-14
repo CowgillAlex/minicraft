@@ -68,6 +68,7 @@ pub struct Renderer {
     door_meshes: Vec<DoorGpu>,
     door_notice: Option<(&'static str, Instant)>,
     pub selected_material: u8,
+    pub hotbar: crate::editing::Hotbar,
     hud_buffer: wgpu::Buffer,
     hud_font: wgpu::BindGroup,
     pub ui: crate::ui::UiState,
@@ -276,6 +277,7 @@ impl Renderer {
             door_meshes: Vec::new(),
             door_notice: None,
             selected_material: crate::world::STONE,
+            hotbar: crate::editing::Hotbar::default(),
             hud_buffer,
             hud_font,
             ui: crate::ui::UiState::default(),
@@ -423,8 +425,15 @@ impl Renderer {
     }
     pub fn pick_material(&mut self, camera: &Camera) {
         if let Some(target) = picking::cast(&self.scene.world, &self.door_meshes, camera) {
-            self.selected_material = target.material(&self.scene.world);
+            self.choose_material(target.material(&self.scene.world));
         }
+    }
+    pub fn select_slot(&mut self, index: usize) {
+        self.selected_material = self.hotbar.select(index);
+    }
+    pub fn choose_material(&mut self, material: u8) {
+        self.hotbar.choose(material);
+        self.selected_material = material;
     }
     pub fn render(&mut self, view: &wgpu::TextureView, camera: &Camera, info: FrameInfo) {
         self.timings
@@ -816,6 +825,7 @@ impl Renderer {
                 grid: self.grid,
                 local_time: self.daylight.follows_local_time(),
                 material: self.selected_material,
+                hotbar: self.hotbar,
                 target: self.target.map(|t| t.hit(&self.scene.world)),
                 target_material: self.target.map(|t| t.material(&self.scene.world)),
                 biome: self.biome_probe.as_ref().map(|probe| probe.name()),

@@ -40,7 +40,7 @@ Surface relief uses broad ridges and restrained 3D displacement, with gradual ri
 | F / F5 | Toggle flight / spectator mode |
 | Left / right click | Break / place a voxel |
 | Middle click or # | Pick the targeted material |
-| 1–0 / Tab | Select a hotbar material / open all materials |
+| 1–0, B, N / Tab | Select a hotbar slot / open the inventory |
 | E | Open or close a door |
 | - / = | Move time backward / forward |
 | F6 | Toggle night vision |
