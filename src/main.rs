@@ -483,6 +483,28 @@ fn run() -> std::result::Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let scene = worldgen::preview::Scene::from_args(&args)?;
+    if let Some(index) = args.iter().position(|arg| arg == "--terrain-audit") {
+        let path = args
+            .get(index + 1)
+            .ok_or("--terrain-audit needs a JSON path")?;
+        let worldgen::preview::Scene::Noise(preview) = scene else {
+            return Err("--terrain-audit needs the noise scene".into());
+        };
+        std::fs::write(
+            path,
+            serde_json::to_vec(&worldgen::atlas::slopes(preview.seed)?)?,
+        )?;
+        return Ok(());
+    }
+    if let Some(index) = args.iter().position(|arg| arg == "--biome-map") {
+        let path = args.get(index + 1).ok_or("--biome-map needs a JSON path")?;
+        let worldgen::preview::Scene::Noise(preview) = scene else {
+            return Err("--biome-map needs the noise scene".into());
+        };
+        let map = worldgen::atlas::sample(preview.seed, 96, 64)?;
+        std::fs::write(path, serde_json::to_vec(&map)?)?;
+        return Ok(());
+    }
     let graphics = graphics::Settings::from_args(&args)?;
     if let worldgen::preview::Scene::Noise(preview) = scene {
         if args.iter().any(|arg| arg == "--worldgen-benchmark") {

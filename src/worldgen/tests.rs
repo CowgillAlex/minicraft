@@ -2,13 +2,6 @@ use super::*;
 use crate::world::{AIR, STONE, WATER};
 use serde_json::Value;
 
-fn close(actual: f64, expected: f64, context: &str) {
-    assert!(
-        actual.is_finite() && (actual - expected).abs() <= 1e-12,
-        "{context}: Rust {actual:.17}, Java {expected:.17}"
-    );
-}
-
 #[test]
 fn seed_stream_matches_java_including_signed_extremes() {
     let data: Value =
@@ -22,52 +15,6 @@ fn seed_stream_matches_java_including_signed_extremes() {
                 expected.as_str().unwrap().parse::<u64>().unwrap()
             );
         }
-    }
-}
-
-#[test]
-fn original_java_slice_matches_density() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-slice.json")).unwrap();
-    let mut previous_seed = None;
-    let mut generator = Generator::new(0).unwrap();
-    let mut sampler = generator.sampler();
-    for row in data["samples"].as_array().unwrap() {
-        let seed = row[0].as_i64().unwrap();
-        if previous_seed != Some(seed) {
-            generator = Generator::new(seed).unwrap();
-            sampler = generator.sampler();
-            previous_seed = Some(seed);
-        }
-        let p = std::array::from_fn(|i| row[i + 1].as_f64().unwrap());
-        close(
-            sampler.density(p),
-            row[4].as_f64().unwrap(),
-            &format!("seed {seed}, {p:?}"),
-        );
-    }
-}
-
-#[test]
-fn fractional_and_negative_coordinates_match_java_3d_adapter() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-continuous.json")).unwrap();
-    let mut previous_seed = None;
-    let mut generator = Generator::new(0).unwrap();
-    let mut sampler = generator.sampler();
-    for row in data["samples"].as_array().unwrap() {
-        let seed = row[0].as_i64().unwrap();
-        if previous_seed != Some(seed) {
-            generator = Generator::new(seed).unwrap();
-            sampler = generator.sampler();
-            previous_seed = Some(seed);
-        }
-        let p = std::array::from_fn(|i| row[i + 1].as_f64().unwrap());
-        close(
-            sampler.density(p),
-            row[4].as_f64().unwrap(),
-            &format!("seed {seed}, {p:?}"),
-        );
     }
 }
 
@@ -93,33 +40,6 @@ fn generated_page_samples_at_voxel_spacing_with_the_requested_origin() {
         assert_eq!(page[x + 32 * (z + 32 * y)], independent.material(p));
     }
     assert_eq!(preview.point([1, 1, 1]), [125.0625, 60.0625, -0.9375]);
-}
-
-#[test]
-fn three_dimensional_aquifer_matches_java_reference_and_cache_order() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-aquifer3d.json")).unwrap();
-    for seed in [0, 1, 12345, -928341, i64::MIN, i64::MAX] {
-        let generator = Generator::new(seed).unwrap();
-        let rows: Vec<_> = data["samples"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|row| row[0].as_i64() == Some(seed))
-            .collect();
-        for reverse in [false, true] {
-            let mut sampler = generator.sampler();
-            for i in 0..rows.len() {
-                let row = rows[if reverse { rows.len() - 1 - i } else { i }];
-                let p = std::array::from_fn(|axis| row[axis + 1].as_f64().unwrap());
-                assert_eq!(
-                    sampler.material(p),
-                    row[5].as_u64().unwrap() as u8,
-                    "seed {seed}, {p:?}, reversed {reverse}"
-                );
-            }
-        }
-    }
 }
 
 #[test]
@@ -248,31 +168,6 @@ fn prepared_bounds_match_graph_intervals_and_enclose_density() {
                     assert!(value >= actual[0] - 1e-12 && value <= actual[1] + 1e-12);
                 }
             }
-        }
-    }
-}
-
-#[test]
-fn prepared_fields_match_the_java_density_reference() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-continuous.json")).unwrap();
-    for seed in [0, 1, 12345, -928341, i64::MIN, i64::MAX] {
-        let generator = Generator::new(seed).unwrap();
-        assert!(generator.plan.is_some(), "the bundled graph should compile");
-        let mut sampler = generator.sampler();
-        for row in data["samples"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|v| v[0].as_i64() == Some(seed))
-        {
-            let p = std::array::from_fn(|i| row[i + 1].as_f64().unwrap());
-            let prepared = sampler.prepared(p, p).unwrap();
-            close(
-                prepared.sample(p),
-                row[4].as_f64().unwrap(),
-                &format!("prepared seed {seed}, {p:?}"),
-            );
         }
     }
 }
@@ -414,4 +309,47 @@ fn infinite_worker_loads_positive_and_negative_regions_without_a_gpu() {
         .light
         .expect("placed lamps require a regional light texture");
     assert!(light.as_chunks::<2>().0.iter().any(|p| p[0] > 100));
+}
+
+#[test]
+fn original_world_is_seeded_bounded_and_matches_fast_sampling() {
+    let a = Generator::new(742).unwrap();
+    let b = Generator::new(742).unwrap();
+    let c = Generator::new(-91).unwrap();
+    let (mut a, mut b, mut c) = (a.sampler(), b.sampler(), c.sampler());
+    let mut differs = false;
+    for x in [-1024.25, -19.5, 0.0, 127.75, 2048.0] {
+        for z in [-517.5, 0.0, 823.25] {
+            assert!(a.density([x, -64.0, z]) > 0.0);
+            assert!(a.density([x, 319.0, z]) < 0.0);
+            for y in [-32.5, 24.25, 63.0, 112.5, 200.0] {
+                let p = [x, y, z];
+                let value = a.density(p);
+                assert!(value.is_finite());
+                assert_eq!(value, b.density(p));
+                assert!((value - a.density_fast(p)).abs() < 1e-10);
+                differs |= (value - c.density(p)).abs() > 1e-6;
+                assert_eq!(a.material(p), a.material_fast(p));
+            }
+        }
+    }
+    assert!(differs);
+}
+
+#[test]
+fn original_biome_niches_select_their_own_centres() {
+    let table = biomes::Table::shared().unwrap();
+    let rows: Vec<Value> =
+        serde_json::from_str(include_str!("../../assets/worldgen/biomes.json")).unwrap();
+    for row in rows {
+        let climate = std::array::from_fn(|i| {
+            (row[i][0].as_f64().unwrap() + row[i][1].as_f64().unwrap()) / 2.0
+        });
+        let id = table.sample(
+            table.column(climate),
+            climate[4],
+            table.id(row[6].as_str().unwrap()).unwrap(),
+        );
+        assert_eq!(table.name(id), row[6].as_str().unwrap());
+    }
 }

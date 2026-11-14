@@ -22,14 +22,15 @@ struct Column {
     ceiling_air: Option<bool>,
 }
 struct BiomeColumn {
-    candidate: biomes::Column,
-    values: [Option<u8>; 96],
+    climate: [f64; 6],
+    environment: biomes::Environment,
 }
 #[derive(Default)]
 pub struct Cache {
     columns: crate::cache::Cache<Xz, Column, 65536>,
     heights: crate::cache::Cache<Xz, f64, 65536>,
-    biomes: crate::cache::Cache<Xz, BiomeColumn, 4096>,
+    biomes: crate::cache::Cache<Xz, BiomeColumn, 16384>,
+    climates: crate::cache::Cache<Xz, [f64; 8], 4096>,
 }
 fn point([x, z]: Xz, y: i32) -> [f64; 3] {
     [x as f64 / 16.0, y as f64 / 16.0, z as f64 / 16.0]
@@ -110,9 +111,8 @@ impl Cache {
                             y -= 1;
                         }
                         context.p[1] = (origin[1] + top) as f64 / 16.;
-                        let id = RuleContext::biome(&mut context);
                         paint_span(
-                            &surface.by_biome[id as usize],
+                            &surface.rules,
                             &mut context,
                             cells,
                             [x, z],
@@ -203,31 +203,120 @@ impl Cache {
         }
         false
     }
+    /// Noise is cached at four-metre *nodes* and interpolated continuously. The
+    /// selected biome and environmental eligibility are sampled at voxel scale.
+    fn climate(&mut self, sampler: &mut TerrainSampler<'_>, p: [f64; 3]) -> [f64; 8] {
+        let lo = [(p[0] / 4.0).floor() as i32, (p[2] / 4.0).floor() as i32];
+        let t = [p[0] / 4.0 - lo[0] as f64, p[2] / 4.0 - lo[1] as f64];
+        let mut result = [0.0; 8];
+        for z in 0..=1 {
+            for x in 0..=1 {
+                let key = [lo[0] + x, lo[1] + z];
+                let values = if let Some(v) = self.climates.get(&key) {
+                    *v
+                } else {
+                    let point = [key[0] as f64 * 4.0, 63.0, key[1] as f64 * 4.0];
+                    let climate = sampler.climate(point);
+                    let waterways = sampler
+                        .density
+                        .density
+                        .waterways
+                        .map(|ids| ids.map(|id| sampler.density.eval(id, point)))
+                        .unwrap_or([1.0, -1.0]);
+                    let v =
+                        std::array::from_fn(|i| if i < 6 { climate[i] } else { waterways[i - 6] });
+                    self.climates.insert(key, v);
+                    v
+                };
+                let weight = (if x == 0 { 1.0 - t[0] } else { t[0] })
+                    * (if z == 0 { 1.0 - t[1] } else { t[1] });
+                for i in 0..8 {
+                    result[i] += weight * values[i];
+                }
+            }
+        }
+        result
+    }
     pub(in crate::worldgen) fn biome(
         &mut self,
         surface: &Surface,
         sampler: &mut TerrainSampler<'_>,
         p: [f64; 3],
     ) -> u8 {
-        let key = [(p[0] / 4.0).floor() as i32, (p[2] / 4.0).floor() as i32];
-        let qy = ((p[1] + 64.0) / 4.0).floor().clamp(0.0, 95.0) as usize;
-        let mut col = self.biomes.remove(&key).unwrap_or_else(|| {
-            let p = [f64::from(key[0] * 4 + 2), 63.0, f64::from(key[1] * 4 + 2)];
+        let key = [(p[0] * 16.0).floor() as i32, (p[2] * 16.0).floor() as i32];
+        let point = [
+            key[0] as f64 / 16.0,
+            (p[1] * 16.0).floor().clamp(-1024.0, 5119.0) / 16.0,
+            key[1] as f64 / 16.0,
+        ];
+        let col = self.biomes.remove(&key).unwrap_or_else(|| {
+            let fields = self.climate(sampler, point);
+            let climate = std::array::from_fn(|i| fields[i]);
+            let ground = self.ground(sampler, key);
+            let sea = f64::from(sampler.density.density.sea_level);
+            let submerged = ground < sea
+                && sampler.material_fast([point[0], ground + 0.125, point[2]]) == WATER;
+            let depth = if submerged {
+                (sea - ground).max(0.0)
+            } else {
+                0.0
+            };
+            let mut near_water = false;
+            let mut relief = 0.0_f64;
+            if (sea - 4.0..=sea + 14.0).contains(&ground) {
+                for [dx, dz] in [[-12, 0], [12, 0], [0, -12], [0, 12]] {
+                    let k = [key[0] + dx * 16, key[1] + dz * 16];
+                    let h = self.height(sampler, k);
+                    relief = relief.max((h - ground).abs());
+                    near_water |= h < sea
+                        && sampler.material_fast([
+                            k[0] as f64 / 16.0,
+                            sea - 0.0625,
+                            k[1] as f64 / 16.0,
+                        ]) == WATER;
+                }
+            }
             BiomeColumn {
-                candidate: surface.biomes.column(sampler.climate(p)),
-                values: [None; 96],
+                climate,
+                environment: biomes::Environment {
+                    ground,
+                    submerged,
+                    water_depth: depth,
+                    coast: (sea..=sea + 3.0).contains(&ground) && near_water,
+                    wetland: (sea - 4.0..=sea + 14.0).contains(&ground)
+                        && relief <= 8.0
+                        && climate[0] > -0.45
+                        && climate[1] > 0.1,
+                    river: submerged && depth < 10.0 && fields[6] < 0.045 && climate[2] > -0.3,
+                    pond: submerged && depth < 12.0 && (fields[7] > 0.32 || climate[2] > -0.05),
+                },
             }
         });
-        let result = *col.values[qy].get_or_insert_with(|| {
-            let p = [
-                f64::from(key[0] * 4 + 2),
-                -64.0 + qy as f64 * 4.0 + 2.0,
-                f64::from(key[1] * 4 + 2),
-            ];
-            surface.biomes.sample(col.candidate, sampler.depth(p))
-        });
+        let mut climate = col.climate;
+        // Small coherent variations mix neighbouring materials through a band,
+        // including snow/grass and stone/deepslate, without voxel-white-noise.
+        climate[0] += surface.noises[surface.blend].sample(point) * 0.035;
+        climate[1] += surface.noises[surface.blend].sample([
+            point[0] + 37.0,
+            point[1] + 11.0,
+            point[2] - 19.0,
+        ]) * 0.035;
+        let result = surface.biomes.sample_environment(
+            surface.biomes.column(climate),
+            point[1],
+            col.environment,
+        );
         self.biomes.insert(key, col);
         result
+    }
+    pub(in crate::worldgen) fn ground(&mut self, sampler: &mut TerrainSampler<'_>, key: Xz) -> f64 {
+        let h = self.height(sampler, key);
+        for y in (((h - 2.0) * 16.0) as i32..=((h + 2.0) * 16.0) as i32).rev() {
+            if sampler.material_fast(point(key, y)) == STONE {
+                return (y + 1) as f64 / 16.0;
+            }
+        }
+        h
     }
     pub(in crate::worldgen) fn height(&mut self, sampler: &mut TerrainSampler<'_>, key: Xz) -> f64 {
         if let Some(value) = self.heights.get(&key) {
@@ -297,7 +386,7 @@ impl RuleContext for Context<'_, '_> {
         self.p[1]
     }
     fn biome(&mut self) -> u8 {
-        let key = ((self.p[1] + 64.0) / 4.0).floor() as i32;
+        let key = (self.p[1] * 16.0).floor() as i32;
         if let Some((y, id)) = self.biome {
             if y == key {
                 return id;
@@ -310,11 +399,20 @@ impl RuleContext for Context<'_, '_> {
     fn cold(&mut self) -> bool {
         let id = self.biome();
         let name = self.surface.biomes.name(id);
-        name.contains("snowy") || name.contains("frozen") || name.contains("ice")
+        matches!(name, "frostmere" | "rime_crown" | "frostflow")
     }
     fn noise(&mut self, index: usize) -> f64 {
         *self.column.noise[index]
             .get_or_insert_with(|| self.surface.noises[index].sample([self.p[0], 0.0, self.p[2]]))
+    }
+    fn cave_growth(&mut self) -> f64 {
+        let value = self.surface.cave_growth(self.p);
+        let id = self.biome();
+        if matches!(self.surface.biomes.name(id), "glimmerdeep" | "hollowstone") {
+            value + self.surface.noises[self.surface.blend].sample(self.p.map(|v| v * 2.0)) * 0.15
+        } else {
+            value
+        }
     }
     fn surface_depth(&mut self) -> f64 {
         self.column.depth

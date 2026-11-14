@@ -24,12 +24,13 @@ struct Candidate {
 }
 
 /// Seeded 3D fluid cells, with pressure barriers between incompatible water levels.
-/// Keeps Paper-Minecraft's fluid rules and empty lava band; terrain density is unchanged.
+/// Exposed basins fill to sea level; covered caves retain independent fluid cells.
 pub struct Aquifer {
     random: Random,
     locations: crate::cache::Cache<[i32; 3], [i32; 3], 65536>,
     statuses: crate::cache::Cache<[i32; 3], Fluid, 65536>,
     surfaces: crate::cache::Cache<[i32; 2], i32, 65536>,
+    open_surfaces: crate::cache::Cache<[u64; 2], Option<f64>, 65536>,
     anchor: Option<[i32; 3]>,
     neighbors: [Candidate; 12],
 }
@@ -42,6 +43,39 @@ impl Aquifer {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Fluid> {
+        if sampler.density.waterways.is_some() {
+            let mut highest = f64::NEG_INFINITY;
+            for x in [min[0], max[0]] {
+                for z in [min[2], max[2]] {
+                    highest = highest.max(self.open_surface(sampler, x, z)?);
+                }
+            }
+            if min[1] >= highest {
+                return Some(global_fluid(0, sampler.density.sea_level));
+            }
+            // A shared solid roof proves every column is underground. Without
+            // that proof an open surface channel may run through this box.
+            let mut roof = false;
+            let mut y = (max[1] / 8.0).ceil() * 8.0;
+            while y < f64::from(sampler.density.min_y + sampler.density.height) {
+                if sampler
+                    .bounds(
+                        sampler.density.roots[0],
+                        [min[0], y, min[2]],
+                        [max[0], y, max[2]],
+                    )
+                    .low
+                    > 0.0
+                {
+                    roof = true;
+                    break;
+                }
+                y += 8.0;
+            }
+            if !roof {
+                return None;
+            }
+        }
         let lava = f64::from((-54).min(sampler.density.sea_level));
         if max[1] < lava {
             return Some(Fluid {
@@ -84,6 +118,7 @@ impl Aquifer {
             locations: Default::default(),
             statuses: Default::default(),
             surfaces: Default::default(),
+            open_surfaces: Default::default(),
             anchor: None,
             neighbors: [Candidate::default(); 12],
         }
@@ -97,6 +132,13 @@ impl Aquifer {
     ) -> u8 {
         if density > 0.0 {
             return STONE;
+        }
+        if sampler.density.waterways.is_some()
+            && self
+                .open_surface(sampler, x, z)
+                .is_some_and(|surface| y >= surface)
+        {
+            return global_fluid(0, sampler.density.sea_level).at(y);
         }
         if y < f64::from((-54).min(sampler.density.sea_level)) {
             return AIR;
@@ -162,6 +204,30 @@ impl Aquifer {
         fluid
     }
 
+    /// Highest zero crossing of the interpolated terrain, independent of aquifers.
+    /// Above this height water can fill a basin without filling a covered cave.
+    fn open_surface(&mut self, sampler: &mut Sampler<'_>, x: f64, z: f64) -> Option<f64> {
+        let key = [x.to_bits(), z.to_bits()];
+        if let Some(h) = self.open_surfaces.get(&key) {
+            return *h;
+        }
+        let mut top = f64::from(sampler.density.min_y + sampler.density.height - 1);
+        let mut above = sampler.root(0, [x, top, z]);
+        let mut y = (top / 8.0).floor() * 8.0;
+        let mut result = None;
+        while y >= f64::from(sampler.density.min_y) {
+            let value = sampler.root(0, [x, y, z]);
+            if value > 0.0 {
+                result = Some(y + (top - y) * value / (value - above));
+                break;
+            }
+            top = y;
+            above = value;
+            y -= 8.0;
+        }
+        self.open_surfaces.insert(key, result);
+        result
+    }
     fn location(&mut self, key: [i32; 3]) -> [i32; 3] {
         if let Some(value) = self.locations.get(&key) {
             return *value;

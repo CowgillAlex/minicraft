@@ -10,17 +10,11 @@ impl TerrainSampler<'_> {
     pub(crate) fn feature_ground(&mut self, x: f64, z: f64) -> glam::DVec3 {
         let key = [(x * 16.).floor() as i32, (z * 16.).floor() as i32];
         let mut cache = std::mem::take(&mut self.surface_cache);
-        let h = cache.height(self, key);
+        let h = cache.ground(self, key);
         self.surface_cache = cache;
-        let x = key[0] as f64 / 16.;
-        let z = key[1] as f64 / 16.;
-        for yy in (((h - 2.) * 16.) as i32..=((h + 2.) * 16.) as i32).rev() {
-            if self.material_fast([x, yy as f64 / 16., z]) == crate::world::STONE {
-                return glam::DVec3::new(x, (yy + 1) as f64 / 16., z);
-            }
-        }
-        glam::DVec3::new(x, h, z)
+        glam::DVec3::new(key[0] as f64 / 16.0, h, key[1] as f64 / 16.0)
     }
+
     pub fn decorate_features(&mut self, origin: [i32; 3], data: &mut crate::chunk::Chunk) {
         let mut cache = std::mem::take(&mut self.features);
         cache

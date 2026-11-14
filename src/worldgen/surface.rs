@@ -22,10 +22,16 @@ pub struct Surface {
     pub(super) surface: usize,
     pub(super) secondary: usize,
     pub(super) clay: usize,
+    pub(super) growth: usize,
+    pub(super) blend: usize,
     pub(super) bands: [u8; 192],
     pub(super) transparent: Vec<u8>,
 }
 impl Surface {
+    /// Shared 3D patch field keeps soil, plants and ceiling vines in the same pockets.
+    pub(super) fn cave_growth(&self, point: [f64; 3]) -> f64 {
+        self.noises[self.growth].sample(point)
+    }
     pub fn new(seed: i64) -> Result<Self, String> {
         let data: Value = serde_json::from_str(include_str!("../../assets/worldgen/surface.json"))
             .map_err(|e| e.to_string())?;
@@ -44,7 +50,7 @@ impl Surface {
                 rules
                     .specialize(
                         id as u8,
-                        name.contains("snowy") || name.contains("frozen") || name.contains("ice"),
+                        matches!(name, "frostmere" | "rime_crown" | "frostflow"),
                     )
                     .unwrap_or(Rule::Sequence(Vec::new()))
             })
@@ -58,6 +64,8 @@ impl Surface {
             surface: indices["surface"],
             secondary: indices["surface_secondary"],
             clay: indices["clay_bands_offset"],
+            growth: indices["cave_growth"],
+            blend: indices["biome_blend"],
             bands: bands(seed),
             transparent,
         })

@@ -14,6 +14,20 @@ impl Condition {
         let agree = |a: bool, b: bool| (a == b).then_some(a);
         match self {
             Self::Not(condition) => condition.span(c, low).map(|v| !v),
+            Self::Biome(_) => {
+                if low == high {
+                    Some(self.test(c))
+                } else {
+                    None
+                }
+            }
+            Self::CaveGrowth { .. } => {
+                if low == high {
+                    Some(self.test(c))
+                } else {
+                    None
+                }
+            }
             Self::Y {
                 anchor,
                 mult,

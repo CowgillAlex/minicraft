@@ -1,4 +1,32 @@
-# Worldgen source
+# World generation assets
+
+## Current MiniCraft recipes
+
+MiniCraft uses original terrain, biome and surface recipes on the existing seeded noise and density engine. These recipes intentionally produce different worlds from Minecraft and the earlier Paper-Minecraft terrain port.
+
+- `overworld.json` defines broad continental relief and ridges, restrained 3D displacement, humidity-dependent caves, warped rivers and pond basins. Continental uplift fades out in deep-ocean regions. The vertical range is -64 to 320 metres, with sea level at 63 metres.
+- `biomes.json` defines 17 original climate niches. Terrain eligibility separates land, coasts, rivers, ponds, shallow oceans, deep oceans and covered caves. Rootvault, Hollowstone and Glimmerdeep provide distinct cave habitats.
+- `surface.json` defines biome materials, spatial material transitions and coherent cave patches. Cave surfaces remain predominantly stone, with frequent patches of grass, calcite or mineral growth.
+- `ores.json` retains earlier ore placement data. Vegetation, flowers, cave lights and cottages use MiniCraft's feature recipes and named random streams.
+
+Terrain samples use 6.25 cm voxel spacing and 4 × 8 × 4 metre density interpolation cells. Climate values are cached at four-metre horizontal nodes and interpolated continuously; biome eligibility and material selection use fine voxel coordinates. Debug biome queries share generation's lookup. Small coherent 3D variations soften material boundaries, including stone/deepslate.
+
+Exposed basins fill to sea level above the highest terrain crossing. Covered caves retain independent 3D aquifers and pressure barriers. Rootvault plants and hanging growth include real light emitters shared by rendering, unloaded-world lighting queries and player edits.
+
+The following diagnostics run without a graphics adapter:
+
+```sh
+cargo run --release --locked -- --seed 742 --biome-map biome-map.json
+cargo run --release --locked -- --seed 742 --terrain-audit terrain-audit.json
+```
+
+The biome map samples a 96 × 96 grid at 64 metre spacing over a 6.144 km square, including ground/seabed habitats, cave habitats 64 metres below ground, climate and a density section. Cave habitats describe biome regions, not necessarily open tunnels. The slope audit samples 1,024 sites on a 128 metre grid around the origin and measures local gradients over 2 metre and 8 metre spans. Its raw output includes underwater ground so water coverage can be measured separately from land slopes.
+
+Current tests cover deterministic generation, optimized/literal sampling parity, prepared density bounds, biome eligibility, fine material boundaries, exposed surface water, covered aquifers, rolling terrain, cave patches and real cave lighting. The inherited random stream retains its Java fixture check; current terrain and biome tests do not claim Java seed parity.
+
+## Historical port notes
+
+The sections below document the earlier port and its archived reference fixtures. They describe the old assets and parity checks, not the current MiniCraft recipes. Legacy worldgen and surface asset exporters can overwrite the current JSON files with the old reference assets; they are retained for engine investigation and are not part of the normal build or tuning workflow. The game embeds its assets and requires neither Java nor a reference checkout.
 
 Ported from Alex's [Paper-Minecraft PR #1](https://github.com/CowgillAlex/Paper-Minecraft/pull/1), commit `d681c0532d5e2628c70e6de7fad7df31f64ea705`.
 

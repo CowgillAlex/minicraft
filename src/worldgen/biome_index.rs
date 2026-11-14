@@ -87,7 +87,7 @@ fn indexed_candidates_match_table_order_at_random_points_and_edges() {
         } else {
             std::array::from_fn(|_| rng.double() * 4. - 2.)
         };
-        let mut expected = [None; 4];
+        let mut expected = [None; super::HABITATS];
         for (i, e) in table.entries.iter().enumerate() {
             let score = AXES
                 .into_iter()

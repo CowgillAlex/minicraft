@@ -237,7 +237,19 @@ pub fn detail(out: &mut Vec<P>, base: V, kind: Habitat, rng: &mut Rng) {
             }
         }
         Mushroom => mushroom(out, base, rng, true),
-        Pine | Dark | Pale | Jungle | Wetland | Lush => {
+        Lush => {
+            let choice = rng.unit();
+            if choice < 0.45 {
+                grass(out, base, rng, false);
+            } else if choice < 0.72 {
+                fern(out, base, rng);
+            } else if choice < 0.84 {
+                mushroom(out, base, rng, false);
+            } else {
+                cave_flower(out, base, rng);
+            }
+        }
+        Pine | Dark | Pale | Jungle | Wetland => {
             if rng.unit() < 0.18 {
                 mushroom(out, base, rng, false)
             } else {
@@ -282,6 +294,13 @@ pub fn detail(out: &mut Vec<P>, base: V, kind: Habitat, rng: &mut Rng) {
                 CRYSTAL,
                 Replace::Air,
                 25,
+            ));
+            out.push(P::ellipsoid(
+                base + V::Y * 0.4,
+                V::splat(0.085),
+                LIGHT,
+                Replace::Air,
+                35,
             ));
         }
         Dripstone => {
@@ -377,4 +396,29 @@ pub fn bamboo(out: &mut Vec<P>, base: V, rng: &mut Rng) {
             }
         }
     }
+}
+
+/// A flower with a real emissive centre, shared by procedural caves and previews.
+pub fn cave_flower(out: &mut Vec<P>, base: V, rng: &mut Rng) {
+    let mut blossom = Vec::new();
+    let color = [PETAL_BLUE, PETAL_PINK, PETAL_WHITE][rng.index(3)];
+    flower(&mut blossom, base, rng, color);
+    // Short blooms fit on cave ledges, while retaining full-width petals.
+    for p in &mut blossom {
+        match &mut p.shape {
+            super::geometry::Shape::Ellipsoid { center, radius } => {
+                center.y = base.y + (center.y - base.y) * 0.6;
+                radius.y *= 0.6;
+            }
+            super::geometry::Shape::Branch { a, b, .. } => {
+                a.y = base.y + (a.y - base.y) * 0.6;
+                b.y = base.y + (b.y - base.y) * 0.6;
+            }
+            _ => {}
+        }
+        if p.material == POLLEN {
+            p.material = LIGHT;
+        }
+    }
+    out.extend(blossom);
 }

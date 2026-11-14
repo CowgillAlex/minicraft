@@ -1,9 +1,10 @@
 use super::density::{Binary, Density, Id, Node, Sampler, Unary};
 
-/// Compile the bundled final-density expression into its five interpolation inputs.
+/// Compile a direct interpolated field or the legacy five-input density shape.
 /// Every constant is read from the graph. Other graph shapes use the generic evaluator.
 #[derive(Clone, Copy)]
 pub struct Plan {
+    direct: bool,
     inputs: [Id; 5],
     terrain_scale: f64,
     noodle_scale: f64,
@@ -41,6 +42,17 @@ fn absolute(density: &Density, id: Id) -> Option<Id> {
 
 impl Plan {
     pub fn compile(density: &Density) -> Option<Self> {
+        if matches!(density.nodes[density.roots[0]], Node::Interpolated(_)) {
+            return Some(Self {
+                direct: true,
+                inputs: [density.roots[0]; 5],
+                terrain_scale: 1.0,
+                noodle_scale: 0.0,
+                gate_min: 0.0,
+                gate_max: 0.0,
+                gate_value: 0.0,
+            });
+        }
         let Node::Binary(Binary::Min, terrain, noodle) = density.nodes[density.roots[0]] else {
             return None;
         };
@@ -82,6 +94,7 @@ impl Plan {
             return None;
         }
         Some(Self {
+            direct: false,
             inputs,
             terrain_scale,
             noodle_scale,
@@ -103,7 +116,12 @@ impl Plan {
         }
         let mut values = [[0.0; 8]; 5];
         let mut base = [0.0; 3];
-        for (i, id) in self.inputs.into_iter().enumerate() {
+        for (i, id) in self
+            .inputs
+            .into_iter()
+            .take(if self.direct { 1 } else { 5 })
+            .enumerate()
+        {
             let (key, corners) = sampler.interpolation_cell(id, min)?;
             values[i] = corners;
             base = std::array::from_fn(|axis| f64::from(key[axis]) * sizes[axis]);
@@ -155,6 +173,9 @@ impl Prepared {
             }
             [low, high]
         };
+        if self.plan.direct {
+            return range(0);
+        }
         let scale = |[low, high]: [f64; 2], factor: f64| {
             let a = low * factor;
             let b = high * factor;
@@ -201,6 +222,9 @@ impl Prepared {
             (point[2] - self.base[2]) * 0.25,
         ];
         let interpolate = |index| self.interpolate(index, t);
+        if self.plan.direct {
+            return interpolate(0);
+        }
         let c = (self.plan.terrain_scale * interpolate(0)).clamp(-1.0, 1.0);
         let terrain = c / 2.0 - c * c * c / 24.0;
         let gate = interpolate(1);
