@@ -61,9 +61,13 @@ impl App {
             Action::Resume => self.capture_cursor(true),
             Action::Material(id) => {
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.selected_material = id;
+                    renderer.choose_material(id);
                 }
-                self.capture_cursor(true);
+            }
+            Action::HotbarSlot(index) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.select_slot(index as usize);
+                }
             }
             Action::Title => self.return_to_title(),
             Action::Vsync => {

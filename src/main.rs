@@ -50,6 +50,7 @@ mod title;
 mod ui;
 mod ui_icons;
 mod ui_menu;
+mod ui_style;
 mod ui_view;
 mod upscale;
 mod view_settings;
@@ -368,17 +369,17 @@ impl ApplicationHandler for App {
                                 _ => 9,
                             };
                             if let Some(renderer) = &mut self.renderer {
-                                renderer.selected_material = editing::PALETTE[index];
+                                renderer.select_slot(index);
                             }
                         }
                         KeyCode::KeyB => {
                             if let Some(renderer) = &mut self.renderer {
-                                renderer.selected_material = crate::world::GLASS;
+                                renderer.select_slot(10);
                             }
                         }
                         KeyCode::KeyN => {
                             if let Some(renderer) = &mut self.renderer {
-                                renderer.selected_material = world::HANDLE;
+                                renderer.select_slot(11);
                             }
                         }
                         KeyCode::KeyE if self.captured => {

@@ -1,12 +1,11 @@
+pub use crate::ui_style::{ACCENT, MUTED, TEXT};
 use crate::{
     camera::Camera,
     editing::{self, Hit},
     hud::{Hud, HudVertex},
-    ui::{Layout, Rect, UiState},
+    ui::{Layout, Rect, UiState, HOTBAR_GAP, HOTBAR_SLOT},
+    ui_style as style,
 };
-pub const TEXT: [f32; 4] = [0.94, 0.95, 0.93, 1.0];
-pub const MUTED: [f32; 4] = [0.60, 0.65, 0.65, 1.0];
-pub const ACCENT: [f32; 4] = [0.65, 0.84, 0.66, 1.0];
 pub struct OverlayStats<'a> {
     pub noise_preview: Option<crate::worldgen::preview::Preview>,
     pub voxels: usize,
@@ -22,6 +21,7 @@ pub struct OverlayStats<'a> {
     pub local_time: bool,
     pub interaction: Option<&'a str>,
     pub material: u8,
+    pub hotbar: editing::Hotbar,
     pub target: Option<Hit>,
     pub target_material: Option<u8>,
     pub biome: Option<&'a str>,
@@ -42,112 +42,83 @@ pub fn vertices(
 ) -> Vec<HudVertex> {
     let layout = Layout::new(size);
     let mut hud = Hud::new(layout.width, layout.height);
-    let shadow = [0.0, 0.0, 0.0, 0.65];
-    hud.styled_text("MiniCraft", 25.0, 25.0, 16.0, shadow, true);
-    hud.styled_text("MiniCraft", 24.0, 24.0, 16.0, [0.94, 0.95, 0.93, 0.8], true);
     if let Some(preview) = stats.noise_preview {
-        hud.text(
+        style::tracked(
+            &mut hud,
             &format!(
-                "{} / Seed {}",
+                "{} {}",
                 if preview.infinite {
-                    "World"
+                    "SEED"
                 } else {
-                    "Noise preview"
+                    "NOISE PREVIEW"
                 },
                 preview.seed
             ),
             24.0,
-            46.0,
+            22.0,
             11.0,
+            2.0,
             MUTED,
         );
     }
-    let clock = Rect {
-        x: layout.width - 124.0,
-        y: 20.0,
-        w: 104.0,
-        h: 36.0,
-    };
-    hud.rounded_rect(clock, 10.0, [0.055, 0.067, 0.078, 0.88]);
     let hour = stats
         .time
         .get(..2)
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(12);
+    let right = layout.width - 24.0;
+    let time_w = Hud::text_width(stats.time, 26.0, true);
+    style::text(&mut hud, stats.time, right - time_w, 18.0, 26.0, TEXT, true);
     crate::ui_icons::clock(
         &mut hud,
-        clock.x + 20.0,
-        clock.y + 18.0,
+        right - time_w - 16.0,
+        34.0,
         !(6..19).contains(&hour),
     );
-    hud.text(stats.time, clock.x + 38.0, clock.y + 10.0, 16.0, TEXT);
-    hotbar(&mut hud, &layout, stats.material);
-    hud.text("F1  Controls", 25.0, layout.height - 37.0, 13.0, shadow);
-    hud.text(
-        "F1  Controls",
-        24.0,
-        layout.height - 38.0,
-        13.0,
-        [0.85, 0.89, 0.86, 0.8],
+    let mode = format!(
+        "{}  {:.1} M/S",
+        if ui.spectating {
+            "SPECTATOR"
+        } else if ui.flying {
+            "FLY"
+        } else {
+            "WALK"
+        },
+        camera.speed
     );
-    if layout.width >= 1100.0 {
-        let speed = format!(
-            "{}   {:.1} m/s",
-            if ui.spectating {
-                "Spectator"
-            } else if ui.flying {
-                "Fly"
-            } else {
-                "Walk"
-            },
-            camera.speed
-        );
-        let speed_x = layout.width - 24.0 - Hud::text_width(&speed, 13.0, false);
-        hud.text(&speed, speed_x + 1.0, layout.height - 37.0, 13.0, shadow);
-        hud.text(
-            &speed,
-            speed_x,
-            layout.height - 38.0,
-            13.0,
-            [0.85, 0.89, 0.86, 0.8],
-        );
-    }
+    let mut status_y = 52.0;
+    let mut status = |hud: &mut Hud, text: &str, color| {
+        style::tracked_right(hud, text, right, status_y, 10.0, 2.0, color);
+        status_y += 17.0;
+    };
+    status(&mut hud, &mode, ACCENT);
     if stats.night_vision {
-        hud.text("Night vision", 24.0, layout.height - 60.0, 12.0, ACCENT);
+        status(&mut hud, "NIGHT VISION", ACCENT);
     }
     if stats.lighting_pending {
-        hud.text("Updating light", layout.width - 124.0, 66.0, 12.0, MUTED);
+        status(&mut hud, "UPDATING LIGHT", MUTED);
     }
     if stats.meshes_pending {
-        hud.text(
-            "Loading terrain",
-            layout.width - 124.0,
-            if stats.lighting_pending { 84.0 } else { 66.0 },
-            12.0,
-            MUTED,
-        );
+        status(&mut hud, "LOADING TERRAIN", MUTED);
+    }
+    if captured {
+        hotbar(&mut hud, &layout, stats.material, stats.hotbar);
     }
     if captured {
         if let Some(hint) = stats.interaction {
-            let width = Hud::text_width(hint, 13.0, false) + 24.0;
-            hud.rounded_rect(
-                Rect {
-                    x: layout.width / 2.0 - width / 2.0,
-                    y: layout.height / 2.0 + 22.0,
-                    w: width,
-                    h: 28.0,
-                },
-                7.0,
-                [0.035, 0.045, 0.05, 0.9],
-            );
-            hud.centered(
-                hint,
-                layout.width / 2.0,
-                layout.height / 2.0 + 29.0,
-                13.0,
-                TEXT,
-                false,
-            );
+            let (key, label) = hint.split_once("  ").unwrap_or(("", hint));
+            let key_w = if key.is_empty() {
+                0.0
+            } else {
+                style::keycap_width(key) + 8.0
+            };
+            let w = key_w + Hud::text_width(label, 14.0, true);
+            let x = layout.width / 2.0 - w / 2.0;
+            let y = layout.height / 2.0 + 24.0;
+            if !key.is_empty() {
+                style::keycap(&mut hud, key, x, y);
+            }
+            style::text(&mut hud, label, x + key_w, y + 3.0, 14.0, TEXT, true);
         }
         let (x, y) = (layout.width / 2.0, layout.height / 2.0);
         for (dx, dy, w, h) in [
@@ -175,78 +146,73 @@ pub fn vertices(
     }
     hud.vertices
 }
-fn hotbar(hud: &mut Hud, layout: &Layout, material: u8) {
+fn hotbar(hud: &mut Hud, layout: &Layout, material: u8, bar_state: editing::Hotbar) {
     let bar = layout.hotbar();
-    hud.rounded_rect(
-        Rect {
-            y: bar.y + 3.0,
-            ..bar
-        },
-        13.0,
-        [0.0, 0.0, 0.0, 0.22],
+    let name = editing::material_name(material).to_ascii_uppercase();
+    style::tracked_centered(
+        hud,
+        &name,
+        layout.width / 2.0,
+        bar.y - 26.0,
+        14.0,
+        4.0,
+        TEXT,
     );
-    hud.rounded_rect(bar, 13.0, [0.65, 0.71, 0.72, 0.25]);
-    hud.rounded_rect(
-        Rect {
-            x: bar.x + 1.0,
-            y: bar.y + 1.0,
-            w: bar.w - 2.0,
-            h: bar.h - 2.0,
-        },
-        12.0,
-        [0.035, 0.045, 0.050, 0.92],
-    );
-    let name = editing::material_name(material).to_ascii_lowercase();
-    let name = format!("{}{}", name[..1].to_ascii_uppercase(), &name[1..]);
-    let text_width = Hud::text_width(&name, 15.0, true) + 24.0;
-    hud.rounded_rect(
-        Rect {
-            x: layout.width / 2.0 - text_width / 2.0,
-            y: bar.y - 34.0,
-            w: text_width,
-            h: 26.0,
-        },
-        7.0,
-        [0.035, 0.045, 0.050, 0.82],
-    );
-    hud.centered(&name, layout.width / 2.0, bar.y - 29.0, 15.0, TEXT, true);
-    for (i, &m) in editing::PALETTE.iter().enumerate() {
-        let x = bar.x + 8.0 + i as f32 * 46.0;
+    for (i, &m) in bar_state.slots.iter().enumerate() {
         let slot = Rect {
-            x,
-            y: bar.y + 7.0,
-            w: 44.0,
-            h: 50.0,
+            x: bar.x + i as f32 * (HOTBAR_SLOT + HOTBAR_GAP),
+            y: bar.y,
+            w: HOTBAR_SLOT,
+            h: HOTBAR_SLOT,
         };
-        if m == material {
-            hud.rounded_rect(slot, 7.0, [0.80, 0.91, 0.79, 1.0]);
-            hud.rounded_rect(
-                Rect {
-                    x: x + 1.5,
-                    y: slot.y + 1.5,
-                    w: 41.0,
-                    h: 47.0,
-                },
-                5.5,
-                [0.14, 0.20, 0.17, 1.0],
+        let selected = i == bar_state.selected && m == material;
+        style::chamfer(
+            hud,
+            slot,
+            8.0,
+            if selected {
+                [0.36, 0.52, 0.27, 0.72]
+            } else {
+                [0.03, 0.045, 0.055, 0.6]
+            },
+        );
+        if selected {
+            hud.polygon(
+                &[
+                    [slot.x + 8.0, slot.y + slot.h - 3.0],
+                    [slot.x + slot.w, slot.y + slot.h - 3.0],
+                    [slot.x + slot.w, slot.y + slot.h],
+                    [slot.x + 8.0, slot.y + slot.h],
+                ],
+                ACCENT,
             );
-        } else {
-            hud.rounded_rect(slot, 7.0, [0.18, 0.22, 0.23, 0.42]);
+            hud.polygon(
+                &[
+                    [slot.x + 5.0, slot.y + slot.h - 3.0],
+                    [slot.x + 8.0, slot.y + slot.h - 3.0],
+                    [slot.x + 8.0, slot.y + slot.h],
+                ],
+                ACCENT,
+            );
         }
-        crate::ui_icons::block(hud, x + 10.0, bar.y + 13.0, 26.0, m);
-        let key = if i == 10 {
-            "B".to_string()
-        } else if i == 11 {
-            "N".to_string()
-        } else {
-            ((i + 1) % 10).to_string()
+        crate::ui_icons::block(hud, slot.x + 11.0, slot.y + 10.0, 28.0, m);
+        let key = match i {
+            10 => "B".to_string(),
+            11 => "N".to_string(),
+            _ => ((i + 1) % 10).to_string(),
         };
-        hud.text(
+        style::text(
+            hud,
             &key,
-            x + 5.0,
-            bar.y + 43.0,
+            slot.x + 5.0,
+            slot.y + 3.0,
             10.0,
-            if m == material { ACCENT } else { MUTED },
+            if selected {
+                TEXT
+            } else {
+                [0.85, 0.87, 0.84, 0.7]
+            },
+            true,
         );
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
     hud::{Hud, HudVertex},
-    overlay::{ACCENT, MUTED, TEXT},
     ui::{Layout, Rect},
+    ui_style::{self as style, ACCENT, MUTED, TEXT},
 };
 use winit::keyboard::KeyCode;
 
@@ -86,16 +86,18 @@ impl Title {
     }
 }
 
+const FORM_W: f32 = 400.0;
+
 fn controls(layout: &Layout) -> [(Action, Rect); 3] {
-    let x = (layout.width - 400.0) / 2.0;
-    let y = layout.height / 2.0 - 24.0;
+    let x = (layout.width - FORM_W) / 2.0;
+    let y = layout.height / 2.0 - 4.0;
     [
         (
             Action::Seed,
             Rect {
                 x,
                 y,
-                w: 400.0,
+                w: FORM_W,
                 h: 48.0,
             },
         ),
@@ -103,18 +105,18 @@ fn controls(layout: &Layout) -> [(Action, Rect); 3] {
             Action::Create,
             Rect {
                 x,
-                y: y + 132.0,
-                w: 400.0,
-                h: 48.0,
+                y: y + 92.0,
+                w: FORM_W,
+                h: 52.0,
             },
         ),
         (
             Action::Quit,
             Rect {
                 x,
-                y: y + 192.0,
-                w: 400.0,
-                h: 42.0,
+                y: y + 152.0,
+                w: FORM_W,
+                h: 46.0,
             },
         ),
     ]
@@ -126,120 +128,247 @@ pub fn action_at(size: (u32, u32), pointer: [f32; 2]) -> Option<Action> {
         .find(|(_, r)| r.contains(pointer.map(|v| v / layout.scale)))
         .map(|(a, _)| a)
 }
+
+fn shade(c: [f32; 4], gain: f32) -> [f32; 4] {
+    [c[0] * gain, c[1] * gain, c[2] * gain, c[3]]
+}
+
+/// Dusk sky over a side-on slice of blocky hills.
+fn backdrop(hud: &mut Hud, layout: &Layout) {
+    let (w, h) = (layout.width, layout.height);
+    style::gradient(
+        hud,
+        Rect {
+            x: 0.0,
+            y: 0.0,
+            w,
+            h,
+        },
+        [0.07, 0.09, 0.16, 1.0],
+        [0.20, 0.24, 0.33, 1.0],
+    );
+    // A few square clouds drifting high up.
+    for (cx, cy, cw) in [
+        (0.12, 0.14, 7.0),
+        (0.68, 0.09, 9.0),
+        (0.86, 0.24, 5.0),
+        (0.2, 0.34, 6.0),
+    ] {
+        let (x, y) = (cx * w, cy * h);
+        hud.rect(x, y, cw * 18.0, 18.0, [0.75, 0.80, 0.90, 0.07]);
+        hud.rect(
+            x + 36.0,
+            y - 18.0,
+            (cw - 3.0) * 18.0,
+            18.0,
+            [0.75, 0.80, 0.90, 0.07],
+        );
+    }
+    let size = 40.0;
+    let grass = style::Stone {
+        light: [0.55, 0.76, 0.39, 1.0],
+        base: [0.36, 0.56, 0.24, 1.0],
+        dark: [0.24, 0.39, 0.15, 1.0],
+    };
+    let dirt = style::Stone {
+        light: [0.54, 0.39, 0.25, 1.0],
+        base: [0.42, 0.29, 0.17, 1.0],
+        dark: [0.29, 0.20, 0.11, 1.0],
+    };
+    let columns = (w / size).ceil() as i32 + 1;
+    for i in 0..columns {
+        let t = i as f32;
+        let height = (2.8 + 1.4 * (t * 0.37).sin() + 0.9 * (t * 0.91 + 1.3).sin())
+            .round()
+            .max(1.0);
+        let top = h - height * size;
+        let x = i as f32 * size;
+        let mut y = top;
+        let mut depth = 0;
+        while y < h {
+            let stone = match depth {
+                0 => grass,
+                1 | 2 => dirt,
+                _ => style::BUTTON,
+            };
+            // Deeper rows fade towards the sky colour so the form stays legible.
+            let gain = 0.62 - depth as f32 * 0.06;
+            let dim = style::Stone {
+                light: shade(stone.light, gain),
+                base: shade(stone.base, gain),
+                dark: shade(stone.dark, gain),
+            };
+            style::bevel(
+                hud,
+                Rect {
+                    x,
+                    y,
+                    w: size,
+                    h: size,
+                },
+                dim,
+                3.0,
+            );
+            if depth == 0 {
+                // Dirt shows beneath the grass cap.
+                let d = shade(dirt.base, gain);
+                hud.rect(x + 3.0, y + 14.0, size - 6.0, size - 17.0, d);
+                hud.rect(x + 3.0, y + 14.0, size - 6.0, 3.0, shade(grass.dark, gain));
+            }
+            y += size;
+            depth += 1;
+        }
+    }
+    style::gradient(
+        hud,
+        Rect {
+            x: 0.0,
+            y: h * 0.55,
+            w,
+            h: h * 0.45,
+        },
+        [0.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 0.55],
+    );
+}
+
 pub fn vertices(size: (u32, u32), state: &Title) -> Vec<HudVertex> {
     let layout = Layout::new(size);
     let mut hud = Hud::new(layout.width, layout.height);
+    backdrop(&mut hud, &layout);
     let [(.., field), (.., create), (.., quit)] = controls(&layout);
     let center = layout.width / 2.0;
+    let panel = Rect {
+        x: field.x - 28.0,
+        y: field.y - 56.0,
+        w: FORM_W + 56.0,
+        h: quit.y + quit.h + 24.0 - (field.y - 56.0),
+    };
+    let logo_y = panel.y - 128.0;
     crate::ui_icons::block(
         &mut hud,
-        center - 24.0,
-        field.y - 160.0,
-        48.0,
+        center - 26.0,
+        logo_y - 62.0,
+        52.0,
         crate::world::GRASS,
     );
-    hud.centered("MiniCraft", center, field.y - 90.0, 40.0, TEXT, true);
-    hud.centered("New world", center, field.y - 42.0, 14.0, MUTED, false);
-    hud.text("World seed", field.x, field.y - 22.0, 13.0, TEXT);
-    hud.rounded_rect(
-        field,
-        8.0,
-        if state.focused {
-            ACCENT
-        } else {
-            [0.25, 0.30, 0.32, 1.0]
-        },
+    style::centered(
+        &mut hud,
+        "MiniCraft",
+        center + 2.0,
+        logo_y + 4.0,
+        64.0,
+        [0.0, 0.0, 0.0, 0.45],
+        true,
     );
-    hud.rounded_rect(
-        Rect {
-            x: field.x + 1.0,
-            y: field.y + 1.0,
-            w: field.w - 2.0,
-            h: field.h - 2.0,
-        },
-        7.0,
-        [0.035, 0.046, 0.052, 1.0],
+    style::centered(&mut hud, "MiniCraft", center, logo_y, 64.0, TEXT, true);
+    style::tracked_centered(
+        &mut hud,
+        "6.25 CM VOXELS",
+        center,
+        logo_y + 76.0,
+        11.0,
+        4.0,
+        ACCENT,
     );
+    style::panel(&mut hud, panel);
+    style::tracked(
+        &mut hud,
+        "WORLD SEED",
+        field.x,
+        field.y - 26.0,
+        11.0,
+        3.0,
+        TEXT,
+    );
+    if state.focused {
+        hud.rect(
+            field.x - 2.0,
+            field.y - 2.0,
+            field.w + 4.0,
+            field.h + 4.0,
+            TEXT,
+        );
+    }
+    style::well(&mut hud, field);
     if state.selected && state.focused && !state.seed.is_empty() {
         hud.rect(
             field.x + 12.0,
             field.y + 10.0,
-            Hud::text_width(&state.seed, 16.0, false) + 4.0,
-            27.0,
-            [0.21, 0.34, 0.28, 1.0],
+            Hud::text_width(&state.seed, 18.0, true) + 4.0,
+            28.0,
+            [0.24, 0.39, 0.15, 1.0],
         );
     }
-    hud.text(
-        if state.seed.is_empty() {
-            "Random"
-        } else {
-            &state.seed
-        },
-        field.x + 14.0,
-        field.y + 16.0,
-        16.0,
-        if state.seed.is_empty() { MUTED } else { TEXT },
-    );
+    if state.seed.is_empty() {
+        hud.text("Random", field.x + 14.0, field.y + 14.0, 18.0, MUTED);
+    } else {
+        style::text(
+            &mut hud,
+            &state.seed,
+            field.x + 14.0,
+            field.y + 14.0,
+            18.0,
+            TEXT,
+            true,
+        );
+    }
     if state.focused && !state.selected {
         hud.rect(
-            field.x + 14.0 + Hud::text_width(&state.seed, 16.0, false),
-            field.y + 13.0,
-            1.0,
-            22.0,
+            field.x + 15.0 + Hud::text_width(&state.seed, 18.0, true),
+            field.y + 11.0,
+            3.0,
+            26.0,
             ACCENT,
         );
     }
-    hud.text(
-        "Leave blank for a random seed.",
-        field.x,
-        field.y + 60.0,
-        12.0,
-        MUTED,
-    );
     if state.error.is_some() {
-        hud.text(
+        style::text(
+            &mut hud,
             "Seed must be a signed 64-bit whole number.",
             field.x,
-            field.y + 83.0,
+            field.y + 60.0,
             12.0,
             [0.97, 0.58, 0.48, 1.0],
+            false,
+        );
+    } else {
+        style::text(
+            &mut hud,
+            "Leave blank for a random seed.",
+            field.x,
+            field.y + 60.0,
+            12.0,
+            MUTED,
+            false,
         );
     }
     let pointer = state.pointer.map(|v| v / layout.scale);
-    hud.rounded_rect(
-        create,
-        8.0,
-        if create.contains(pointer) {
-            [0.75, 0.92, 0.73, 1.0]
-        } else {
-            ACCENT
-        },
-    );
-    hud.centered(
-        "Create world",
-        center,
-        create.y + 15.0,
-        16.0,
-        [0.035, 0.075, 0.045, 1.0],
-        true,
-    );
-    if quit.contains(pointer) {
-        hud.rounded_rect(quit, 8.0, [0.10, 0.13, 0.14, 1.0]);
+    for (rect, label, primary) in [(create, "Create world", true), (quit, "Quit game", false)] {
+        style::button(
+            &mut hud,
+            style::inset(rect, 3.0),
+            primary,
+            rect.contains(pointer),
+        );
+        style::centered(
+            &mut hud,
+            label,
+            center,
+            rect.y + (rect.h - 18.0) / 2.0 - 1.0,
+            18.0,
+            TEXT,
+            true,
+        );
     }
-    hud.centered("Quit game", center, quit.y + 13.0, 14.0, MUTED, false);
-    hud.text(
+    style::text(
+        &mut hud,
         &format!("v{}", env!("CARGO_PKG_VERSION")),
-        24.0,
-        layout.height - 35.0,
+        20.0,
+        layout.height - 30.0,
         12.0,
         MUTED,
-    );
-    hud.text(
-        "6.25 cm voxels",
-        layout.width - 115.0,
-        layout.height - 35.0,
-        12.0,
-        MUTED,
+        false,
     );
     hud.vertices
 }

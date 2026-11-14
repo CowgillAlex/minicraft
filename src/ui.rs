@@ -44,6 +44,7 @@ pub enum Action {
     Later,
     Material(u8),
     MaterialPage(u8),
+    HotbarSlot(u8),
 }
 #[derive(Clone, Copy)]
 pub struct Rect {
@@ -63,6 +64,12 @@ pub struct Button {
     pub action: Action,
     pub primary: bool,
 }
+pub const MATERIALS_PER_PAGE: usize = 45;
+pub fn material_pages() -> u8 {
+    (crate::materials::ALL.len() - 1).div_ceil(MATERIALS_PER_PAGE) as u8
+}
+pub const HOTBAR_SLOT: f32 = 50.0;
+pub const HOTBAR_GAP: f32 = 4.0;
 pub struct Layout {
     pub scale: f32,
     pub width: f32,
@@ -87,7 +94,7 @@ impl Layout {
             Panel::Settings => (440.0, 550.0),
             Panel::View => (480.0, 588.0),
             Panel::Graphics => (480.0, 590.0),
-            Panel::Materials(_) => (680.0, 562.0),
+            Panel::Materials(_) => (656.0, 578.0),
         };
         Rect {
             x: (self.width - w) / 2.0,
@@ -146,51 +153,66 @@ impl Layout {
             Panel::View => return crate::ui_view::buttons(self),
             Panel::Controls => add(448.0, "Back", Action::Back, false),
             Panel::Materials(page) => {
-                for (x, w, label, action) in [
+                let last = material_pages() - 1;
+                for (x, w, label, action, primary) in [
                     (
-                        24.,
-                        130.,
+                        24.0,
+                        48.0,
                         "Previous",
                         Action::MaterialPage(page.saturating_sub(1)),
+                        false,
                     ),
-                    (164., 320., "Back to world", Action::Resume),
                     (
-                        494.,
-                        162.,
+                        204.0,
+                        48.0,
                         "Next",
-                        Action::MaterialPage(
-                            (page + 1).min(((crate::materials::ALL.len() - 2) / 42) as u8),
-                        ),
+                        Action::MaterialPage((page + 1).min(last)),
+                        false,
                     ),
+                    (p.w - 224.0, 200.0, "Done", Action::Resume, true),
                 ] {
                     buttons.push(Button {
                         rect: Rect {
                             x: p.x + x,
-                            y: p.y + 494.,
+                            y: p.y + 510.0,
                             w,
-                            h: 44.,
+                            h: 44.0,
                         },
                         label,
                         action,
-                        primary: false,
+                        primary,
                     });
                 }
                 for (i, m) in crate::materials::ALL
                     .iter()
                     .filter(|m| m.id != crate::world::AIR)
-                    .skip(page as usize * 42)
-                    .take(42)
+                    .skip(page as usize * MATERIALS_PER_PAGE)
+                    .take(MATERIALS_PER_PAGE)
                     .enumerate()
                 {
                     buttons.push(Button {
                         rect: Rect {
-                            x: p.x + 24.0 + (i % 6) as f32 * 106.0,
-                            y: p.y + 76.0 + (i / 6) as f32 * 58.0,
-                            w: 100.0,
-                            h: 52.0,
+                            x: p.x + 24.0 + (i % 9) as f32 * 68.0,
+                            y: p.y + 72.0 + (i / 9) as f32 * 68.0,
+                            w: 64.0,
+                            h: 64.0,
                         },
                         label: m.name,
                         action: Action::Material(m.id),
+                        primary: false,
+                    });
+                }
+                let bar = 12.0 * 51.0 - 4.0;
+                for i in 0..12u8 {
+                    buttons.push(Button {
+                        rect: Rect {
+                            x: p.x + (p.w - bar) / 2.0 + i as f32 * 51.0,
+                            y: p.y + 444.0,
+                            w: 47.0,
+                            h: 47.0,
+                        },
+                        label: editing::Hotbar::key(i as usize),
+                        action: Action::HotbarSlot(i),
                         primary: false,
                     });
                 }
@@ -232,12 +254,13 @@ impl Layout {
             .map(|b| b.action)
     }
     pub fn hotbar(&self) -> Rect {
-        let w = editing::PALETTE.len() as f32 * 46.0 + 14.0;
+        let n = editing::PALETTE.len() as f32;
+        let w = n * (HOTBAR_SLOT + HOTBAR_GAP) - HOTBAR_GAP;
         Rect {
             x: (self.width - w) / 2.0,
-            y: self.height - 86.0,
+            y: self.height - 24.0 - HOTBAR_SLOT,
             w,
-            h: 64.0,
+            h: HOTBAR_SLOT,
         }
     }
 }

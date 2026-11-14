@@ -1,7 +1,7 @@
 use crate::{
     hud::Hud,
-    overlay::{MUTED, TEXT},
     ui::{Action, Button, Layout, Panel, Rect},
+    ui_style::{self as style, MUTED, TEXT},
     view_settings::{Change, ViewSettings},
 };
 
@@ -54,20 +54,36 @@ pub fn buttons(layout: &Layout) -> Vec<Button> {
 
 pub fn draw(hud: &mut Hud, layout: &Layout, view: ViewSettings) {
     let p = layout.panel(Panel::View);
-    hud.styled_text("Distance & fog", p.x + 26.0, p.y + 26.0, 24.0, TEXT, true);
     for (y, label, value) in [
         (80.0, "Render distance", format!("{:.0} m", view.distance())),
         (278.0, "Fog starts at", format!("{:.0} m", view.fog_start())),
         (362.0, "Fog strength", format!("{}%", view.density())),
     ] {
-        hud.text(label, p.x + 26.0, p.y + y, 13.0, MUTED);
-        hud.centered(&value, p.x + p.w / 2.0, p.y + y + 36.0, 16.0, TEXT, false);
+        style::text(hud, label, p.x + 26.0, p.y + y, 13.0, MUTED, false);
+        let well = Rect {
+            x: p.x + 76.0,
+            y: p.y + y + 24.0,
+            w: p.w - 152.0,
+            h: 40.0,
+        };
+        style::well(hud, well);
+        style::centered(
+            hud,
+            &value,
+            p.x + p.w / 2.0,
+            well.y + 11.0,
+            16.0,
+            TEXT,
+            true,
+        );
     }
-    hud.text(
+    style::text(
+        hud,
         "Longer distances need more GPU memory.",
         p.x + 26.0,
         p.y + 442.0,
         12.0,
         MUTED,
+        false,
     );
 }

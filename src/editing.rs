@@ -17,6 +17,48 @@ pub const PALETTE: [u8; 12] = [
     world::GLASS,
     world::HANDLE,
 ];
+/// The twelve quick-select slots. Choosing a material that is not already
+/// in the bar replaces the selected slot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hotbar {
+    pub slots: [u8; 12],
+    pub selected: usize,
+}
+impl Default for Hotbar {
+    fn default() -> Self {
+        Self {
+            slots: PALETTE,
+            selected: 0,
+        }
+    }
+}
+impl Hotbar {
+    pub fn key(index: usize) -> &'static str {
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "B", "N"][index]
+    }
+    pub fn select(&mut self, index: usize) -> u8 {
+        self.selected = index.min(self.slots.len() - 1);
+        self.slots[self.selected]
+    }
+    pub fn choose(&mut self, material: u8) {
+        match self.slots.iter().position(|&m| m == material) {
+            Some(index) => self.selected = index,
+            None => self.slots[self.selected] = material,
+        }
+    }
+}
+#[cfg(test)]
+#[test]
+fn choosing_a_material_fills_the_selected_slot_or_jumps_to_it() {
+    let mut bar = Hotbar::default();
+    bar.select(2);
+    bar.choose(world::LIGHT);
+    assert_eq!(bar.selected, 9);
+    assert_eq!(bar.slots, PALETTE);
+    bar.select(2);
+    bar.choose(world::WATER);
+    assert_eq!((bar.selected, bar.slots[2]), (2, world::WATER));
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub cell: [i32; 3],

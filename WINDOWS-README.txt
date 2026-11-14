@@ -1,7 +1,7 @@
-MINICRAFT v0.17.0
+MINICRAFT v0.18.0
 Windows x64 / native Rust + wgpu
 
-Run minicraft-v0.17.0-windows-x64.exe. No installer or extra asset files.
+Run minicraft-v0.18.0-windows-x64.exe. No installer or extra asset files.
 The window opens to a dark title screen. Enter a signed 64-bit numeric seed,
 or leave it blank for a random world. Ctrl+A selects the seed and Ctrl+V
 pastes it. Create world starts generation. A dark loading screen shows
@@ -15,7 +15,7 @@ and its small meshing border are prepared before play. Sampling runs on a
 bounded worker pool, prioritizing the view and travel direction.
 Requires Windows 10/11 x64 and a DirectX 12 or Vulkan-capable graphics driver.
 
-STREAMING IN v0.17.0
+STREAMING IN v0.18.0
 Voxel data is delivered independently of cancelled meshes, and border edits
 keep neighbour geometry until its data is loaded. Walking refreshes collision
 data every half metre to avoid getting stuck at an unloaded page boundary.
@@ -31,7 +31,7 @@ F3 reports geometry queue count, active generation, queued/active lighting,
 staged regions and the oldest pending request. Last-region timings report
 first and complete render readiness, excluding display/VSync waiting.
 
-CHUNK OVERLAYS IN v0.17.0
+CHUNK OVERLAYS IN v0.18.0
 F7 toggles world-anchored timing labels for nearby two-metre render chunks.
 Each label identifies the local chunk coordinate and shows generation and
 mesh-build durations in milliseconds. Mesh includes packing and LOD work
@@ -50,7 +50,7 @@ and remain sharp at reduced render scales. Only a limited number of nearby,
 non-overlapping labels are shown. F7 works independently of F3. Menus and
 H hide the labels. Start with --chunk-timings to enable them immediately.
 
-GRAPHICS AND DEBUG IN v0.17.0
+GRAPHICS AND DEBUG IN v0.18.0
 F3 shows frame-time and simulation-tick lagometers, measured FPS/TPS and
 GPU pass times where supported. Frame bars include VSync and frame-limit
 waiting; cyan marks CPU render submission. Tick bars measure actual physics
@@ -88,9 +88,12 @@ geometry when changing LOD, with affected pages invalidated after edits.
 Geometry, AO, transparency and the conservative distant simplifier are unchanged.
 
 UI
-A compact bottom hotbar shows block previews and the selected material.
-Tab opens a dark picker for all 78 materials. Click to select and return
-to the world, or press Tab again to close it.
+Menus use square bevelled stone panels and buttons. The bottom hotbar shows
+twelve block slots and the selected material; the clock, movement mode and
+speed sit in the top-right corner.
+Tab opens the inventory of all 78 materials. Click a block to put it in the
+selected hotbar slot, or click a hotbar slot first to choose which one to
+fill. Hover a block to see its name. Done, Tab or Esc closes it.
 Esc opens the clickable world menu. Settings control AO, VSync, voxel
 outlines, and time of day. Use local time follows the computer clock in
 its local timezone, including while menus are open. This option is off
@@ -142,10 +145,9 @@ After capturing the mouse:
 Left click: break one voxel
 Right click: place one voxel against the targeted face
 Middle click / #: pick the targeted material
-1-0: Stone, Grass, Dirt, Wood, Leaves, Roof, Plaster, Sand, Asphalt, Lamp
-B: select Glass
-N: select Handle
-Tab: choose any material
+1-0, B, N: select hotbar slots 1-12 (Stone, Grass, Dirt, Wood, Leaves,
+  Roof, Plaster, Sand, Asphalt, Lamp, Glass and Handle by default)
+Tab: open the inventory
 A mint outline highlights the target within 8 metres. Edits reset on exit.
 
 DOORS
