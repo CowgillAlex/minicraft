@@ -2,7 +2,7 @@
 
 A native Rust voxel world explorer with 6.25 cm voxels. Each cubic metre contains a 16 × 16 × 16 grid of individually editable voxels.
 
-Explore an infinite world with branching trees, seeded grass, flowers, underwater plants, caves and occasional cottages. Warm lamplight passes through glass, doors swing on their hinges, and a day/night cycle changes the view as you travel. Terrain generation comes from [Paper-Minecraft](https://github.com/CowgillAlex/Paper-Minecraft), sampled at its original metre scale with sixteen times the resolution along each axis.
+Explore an infinite world with branching trees, seeded grass, flowers, underwater plants, caves and occasional cottages. Warm lamplight passes through glass, doors swing on their hinges, and a day/night cycle changes the view as you travel. Terrain uses MiniCraft's own seeded 3D density graph, with meandering river channels, pond basins, deep oceans and distinct cave habitats. Exposed basins fill to sea level while covered caves retain separate aquifers. Biomes use fine voxel sampling with spatial transitions between surface materials. The noise and density evaluator originated from [Paper-Minecraft](https://github.com/CowgillAlex/Paper-Minecraft); terrain recipes and biome definitions are original to MiniCraft.
 
 ![A lit cottage among grass and branching trees beneath a purple night sky](docs/screenshots/cottage-at-night.png)
 
@@ -27,6 +27,8 @@ cargo run --release --locked
 Linux system packages and Windows packaging instructions are in the [development guide](docs/development.md). Assets are embedded in the executable.
 
 Choose a seed on the title screen or leave it blank for a random world. Terrain, meshes and lighting stream as you explore. The world spans -64 to 320 metres vertically, with configurable render distance, fog and adaptive detail. Edits stay in memory while you explore, but nothing is saved to disk yet.
+
+Surface relief uses broad ridges and restrained 3D displacement, with gradual river banks and pond basins. Continental uplift fades out in deep-ocean regions; smaller pond catchments and shallower river centres leave more connected dry land. Headless `--seed SEED --terrain-audit slopes.json` measures actual ground slopes over 2 m and 8 m spans at 1,024 sites around the origin; underwater ground is included in the raw data so comparisons can report land separately.
 
 ## Controls
 

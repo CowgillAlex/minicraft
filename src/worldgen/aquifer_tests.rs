@@ -1,6 +1,68 @@
 use super::*;
 use crate::worldgen::density::{Density, Node};
 
+#[test]
+fn exposed_basins_fill_to_sea_level_without_flooding_covered_caves() {
+    let mut graph = field(false, -1.0);
+    let base = graph.nodes.len();
+    graph.nodes.extend([
+        Node::Y,
+        Node::Gradient {
+            from_y: -64.0,
+            to_y: 320.0,
+            from: 112.0,
+            to: -272.0,
+        },
+        Node::Constant(-1.0),
+        Node::Range {
+            input: base,
+            min: 16.0,
+            max: 32.0,
+            inside: base + 2,
+            outside: base + 1,
+        },
+        Node::Interpolated(base + 3),
+    ]);
+    graph.roots[0] = base + 4;
+    graph.waterways = Some([0; 2]);
+    let mut sampler = crate::worldgen::density::Sampler::new(&graph);
+    let mut aquifer = Aquifer::new(742);
+    for x in [-4.0625, -0.0625, 0.0, 3.9375, 4.0] {
+        for (y, expected) in [
+            (24.0, AIR),
+            (40.0, STONE),
+            (49.0, WATER),
+            (62.9375, WATER),
+            (63.0, AIR),
+        ] {
+            let p = [x, y, -2.125];
+            let density = sampler.root(0, p);
+            assert_eq!(
+                aquifer.substance(&mut sampler, p, density),
+                expected,
+                "{p:?}"
+            );
+        }
+    }
+    assert_eq!(
+        aquifer
+            .uniform_status(&mut sampler, [0.0, 50.0, 0.0], [1.9375, 62.0, 1.9375])
+            .unwrap()
+            .at(50.0),
+        WATER
+    );
+    assert_eq!(
+        aquifer
+            .uniform_status(&mut sampler, [0.0, 24.0, 0.0], [1.9375, 26.0, 1.9375])
+            .unwrap()
+            .at(24.0),
+        AIR
+    );
+    assert!(aquifer
+        .uniform_status(&mut sampler, [0.0, 46.0, 0.0], [1.9375, 50.0, 1.9375])
+        .is_none());
+}
+
 fn field(surface_low: bool, floodedness: f64) -> Density {
     Density {
         nodes: vec![
@@ -23,6 +85,7 @@ fn field(surface_low: bool, floodedness: f64) -> Density {
         blended: Vec::new(),
         roots: [0, 1, 2, 3, 4],
         climate: [0; 6],
+        waterways: None,
         min_y: -64,
         height: 384,
         sea_level: 63,
@@ -170,19 +233,24 @@ fn negative_pressure_cannot_puncture_a_one_voxel_wet_dry_seal() {
 }
 
 #[test]
-fn reported_cave_boundaries_are_sealed_and_spurious_surface_water_is_dry() {
+fn original_aquifers_match_fresh_sampling_at_former_regression_coordinates() {
     let generator = crate::worldgen::Generator::new(1794358123416304200).unwrap();
     let mut sampler = generator.sampler();
-    for (p, expected) in [
-        ([268.0, 22.0, -144.0], STONE),
-        ([268.0625, 22.0, -144.0], STONE),
-        ([272.0, 25.0, -140.0], STONE),
-        ([271.9375, 25.0, -140.0], STONE),
-        ([314.0, 62.0, 25.875], AIR),
-        ([314.0, 62.0, 25.9375], AIR),
-        ([314.6875, 62.875, 25.0625], AIR),
+    // Terrain changed; these coordinates still exercise fractional cell boundaries.
+    for p in [
+        [268.0, 22.0, -144.0],
+        [268.0625, 22.0, -144.0],
+        [272.0, 25.0, -140.0],
+        [271.9375, 25.0, -140.0],
+        [314.0, 62.0, 25.875],
+        [314.0, 62.0, 25.9375],
+        [314.6875, 62.875, 25.0625],
     ] {
-        assert_eq!(sampler.material(p), expected, "{p:?}");
+        assert_eq!(
+            sampler.material_fast(p),
+            generator.sampler().material(p),
+            "{p:?}"
+        );
     }
 }
 

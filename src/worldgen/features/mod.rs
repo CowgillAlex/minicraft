@@ -189,36 +189,41 @@ impl Cache {
                 }
             }
         }
-        if min[1] < 60. {
-            for y in (min[1] / 8.).floor() as i32 - 1..=(max[1] / 8.).floor() as i32 {
-                for z in (min[2] / 8.).floor() as i32..=(max[2] / 8.).floor() as i32 {
-                    for x in (min[0] / 8.).floor() as i32..=(max[0] / 8.).floor() as i32 {
-                        let k = [x, y, z];
-                        let recipes = if let Some(p) = self.cave.get(&k) {
-                            p.clone()
-                        } else {
-                            let p = self
-                                .shared
-                                .get_or_insert_with(Default::default)
-                                .cave(sampler, k);
-                            self.cave.insert(k, p.clone());
-                            p
-                        };
-                        for primitive in recipes.iter() {
-                            if intersects(primitive, min, max) {
-                                selected.push(*primitive);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        selected.extend(self.cave_recipes(sampler, min, max));
 
         let result = Arc::new(selected);
         if optical {
             self.optical_blocks.insert(key, result.clone());
         } else {
             self.blocks.insert(key, result.clone());
+        }
+        result
+    }
+    /// Vines can hang into a lower cell and floor plants can reach above one.
+    fn cave_recipes(
+        &mut self,
+        sampler: &mut TerrainSampler<'_>,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Vec<Primitive> {
+        let mut result = Vec::new();
+        for y in ((min[1] - 2.0) / 8.0).floor() as i32..=((max[1] + 3.0) / 8.0).floor() as i32 {
+            for z in (min[2] / 8.0).floor() as i32..=(max[2] / 8.0).floor() as i32 {
+                for x in (min[0] / 8.0).floor() as i32..=(max[0] / 8.0).floor() as i32 {
+                    let key = [x, y, z];
+                    let recipes = if let Some(p) = self.cave.get(&key) {
+                        p.clone()
+                    } else {
+                        let p = self
+                            .shared
+                            .get_or_insert_with(Default::default)
+                            .cave(sampler, key);
+                        self.cave.insert(key, p.clone());
+                        p
+                    };
+                    result.extend(recipes.iter().filter(|p| intersects(p, min, max)).copied());
+                }
+            }
         }
         result
     }
@@ -229,34 +234,34 @@ impl Cache {
         max: [f64; 3],
     ) -> Vec<[i32; 3]> {
         let mut result = std::collections::BTreeSet::new();
-        // Only cottages emit in the current recipes. Search their placement
-        // lattice directly; a lamp query must not generate every tree, plant
-        // and cave feature in a large lighting halo.
+        // Search cottage candidates without generating unrelated surface plants.
+        // Cave emitters share the exact recipes used for rendering and optics.
+        let mut recipes = self.cave_recipes(sampler, min, max);
         for z in ((min[2] - 8.) / 8.).floor() as i32..=((max[2] + 8.) / 8.).floor() as i32 {
             for x in ((min[0] - 8.) / 8.).floor() as i32..=((max[0] + 8.) / 8.).floor() as i32 {
                 let key = [x, z];
                 if !placement::cabin_candidate(key) && !self.areas.contains_key(&key) {
                     continue;
                 }
-                for p in self
-                    .surface_plan(sampler, key)
-                    .iter()
-                    .filter(|p| p.material == LIGHT)
-                {
-                    let (a, b) = p.bounds();
-                    let a = (a * 16.).floor().as_ivec3().to_array();
-                    let b = (b * 16.).ceil().as_ivec3().to_array();
-                    for yy in a[1]..b[1] {
-                        for zz in a[2]..b[2] {
-                            for xx in a[0]..b[0] {
-                                let c = [xx, yy, zz];
-                                let v =
-                                    (V::new(xx as f64, yy as f64, zz as f64) + V::splat(0.5)) / 16.;
-                                if (0..3).all(|i| v[i] >= min[i] && v[i] <= max[i]) && p.contains(v)
-                                {
-                                    result.insert(c);
-                                }
-                            }
+                recipes.extend(
+                    self.surface_plan(sampler, key)
+                        .iter()
+                        .filter(|p| p.material == LIGHT)
+                        .copied(),
+                );
+            }
+        }
+        for p in recipes.iter().filter(|p| p.material == LIGHT) {
+            let (a, b) = p.bounds();
+            let a = (a * 16.).floor().as_ivec3().to_array();
+            let b = (b * 16.).ceil().as_ivec3().to_array();
+            for yy in a[1]..b[1] {
+                for zz in a[2]..b[2] {
+                    for xx in a[0]..b[0] {
+                        let c = [xx, yy, zz];
+                        let v = (V::new(xx as f64, yy as f64, zz as f64) + V::splat(0.5)) / 16.;
+                        if (0..3).all(|i| v[i] >= min[i] && v[i] <= max[i]) && p.contains(v) {
+                            result.insert(c);
                         }
                     }
                 }

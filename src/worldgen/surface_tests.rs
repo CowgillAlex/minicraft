@@ -41,10 +41,22 @@ impl Context for Fixture<'_> {
     }
     fn cold(&mut self) -> bool {
         let n = self.surface.biomes.name(self.biome);
-        n.contains("snowy") || n.contains("frozen") || n.contains("ice")
+        matches!(n, "frostmere" | "rime_crown" | "frostflow")
     }
     fn noise(&mut self, i: usize) -> f64 {
         self.surface.noises[i].sample([f64::from(self.x), 0.0, 0.0])
+    }
+    fn cave_growth(&mut self) -> f64 {
+        let point = [self.x as f64, self.y as f64, 0.0];
+        let value = self.surface.cave_growth(point);
+        if matches!(
+            self.surface.biomes.name(self.biome),
+            "glimmerdeep" | "hollowstone"
+        ) {
+            value + self.surface.noises[self.surface.blend].sample(point.map(|v| v * 2.0)) * 0.15
+        } else {
+            value
+        }
     }
     fn surface_depth(&mut self) -> f64 {
         (self.noise(self.surface.surface) * 2.75
@@ -56,6 +68,9 @@ impl Context for Fixture<'_> {
         self.noise(self.surface.secondary)
     }
     fn above(&mut self) -> f64 {
+        if self.profile == "fine" {
+            return 0.0625;
+        }
         let mut y = self.y + 1;
         while y < 320 && self.raw(y) == STONE {
             y += 1;
@@ -105,89 +120,76 @@ impl Context for Fixture<'_> {
             [((f64::from(self.y + 64) + offset).floor() as i32).rem_euclid(192) as usize]
     }
 }
+
 #[test]
-fn surface_rules_and_bands_match_pinned_java_on_synthetic_columns() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-surface.json")).unwrap();
-    let mut systems = std::collections::HashMap::new();
-    for row in data["columns"].as_array().unwrap() {
-        let seed = row[0].as_i64().unwrap();
-        let surface = systems
-            .entry(seed)
-            .or_insert_with(|| Surface::new(seed).unwrap());
-        let mut c = Fixture {
-            surface,
-            biome: surface.biomes.id(row[1].as_str().unwrap()).unwrap(),
-            profile: row[2].as_str().unwrap(),
-            x: row[3].as_i64().unwrap() as i32,
-            top: row[4].as_i64().unwrap() as i32,
-            y: 0,
-        };
-        for sample in row[5].as_array().unwrap() {
-            c.y = sample[0].as_i64().unwrap() as i32;
-            let raw = c.raw(c.y);
-            let opacity_candidate = surface.rules.changes_opacity(&mut c);
-            let actual = if raw == STONE {
-                surface.rules.apply(&mut c).unwrap_or(STONE)
-            } else {
-                raw
-            };
-            if raw == STONE {
-                let rule = &surface.by_biome[c.biome as usize];
-                assert_eq!(rule.apply(&mut c).unwrap_or(STONE), actual);
-                let high = c.y;
-                let low = (high - 2).max(-64);
-                if (low..=high).all(|y| c.raw(y) == STONE) {
-                    if let Some(proven) = rule.uniform_span(&mut c, low as f64) {
-                        for y in low..=high {
-                            c.y = y;
-                            assert_eq!(surface.rules.apply(&mut c), proven, "span {low}..{high}");
-                        }
-                        c.y = high;
+fn cave_surfaces_keep_stone_between_frequent_seeded_patches() {
+    for seed in [742, -91, 1794607392029456600] {
+        let surface = Surface::new(seed).unwrap();
+        for name in ["rootvault", "hollowstone", "glimmerdeep"] {
+            let biome = surface.biomes.id(name).unwrap();
+            let mut stone = 0;
+            let mut special = 0;
+            for x in (-160..160).step_by(2) {
+                for y in [-32, 0, 32, 64] {
+                    let mut c = Fixture {
+                        surface: &surface,
+                        biome,
+                        profile: "fine",
+                        x,
+                        top: y + 1,
+                        y,
+                    };
+                    let material = surface.rules.apply(&mut c).unwrap();
+                    assert_eq!(
+                        surface.by_biome[biome as usize].apply(&mut c),
+                        Some(material)
+                    );
+                    if material == STONE {
+                        stone += 1;
+                    } else {
+                        special += 1;
                     }
+                    // A bare cave's subsoil must remain rock, including under a green patch.
+                    c.profile = "dry";
+                    c.top = y + 4;
+                    assert_eq!(surface.rules.apply(&mut c), Some(STONE));
                 }
             }
-            if raw == STONE && matches!(actual, AIR | WATER) {
-                assert!(opacity_candidate);
-                assert!(surface.transparent.contains(&c.biome));
-            }
-            assert_eq!(
-                crate::materials::get(actual).source,
-                sample[1].as_str().unwrap(),
-                "seed {seed}, biome {}, {}, x={}, y={}",
-                row[1],
-                c.profile,
-                c.x,
-                c.y
-            );
-        }
-    }
-    for row in data["bands"].as_array().unwrap() {
-        let seed = row[0].as_i64().unwrap();
-        let surface = &systems[&seed];
-        let x = row[1].as_i64().unwrap() as i32;
-        let offset = surface.noises[surface.clay].sample([f64::from(x) * 0.05, 0.0, 0.0]) * 4.0;
-        for (y, expected) in row[2].as_array().unwrap().iter().enumerate() {
-            let actual =
-                surface.bands[((y as f64 + offset).floor() as i32).rem_euclid(192) as usize];
-            assert_eq!(
-                crate::materials::get(actual).source,
-                expected.as_str().unwrap(),
-                "bands {seed}/{x}/{y}"
+            println!("CAVE PATCH {seed}/{name}: stone={stone}, special={special}");
+            assert!(stone > special, "Caves should remain predominantly stone");
+            assert!(
+                special > 20,
+                "Patches should be frequent, not isolated rarities"
             );
         }
     }
 }
-
 #[test]
-fn surface_biomes_match_java_column_selection() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../assets/worldgen/java-surface.json")).unwrap();
-    let table = Table::shared().unwrap();
-    for row in data["biomes"].as_array().unwrap() {
-        let climate = std::array::from_fn(|i| row[i].as_f64().unwrap());
-        let actual = table.sample(table.column(climate), climate[4]);
-        assert_eq!(table.name(actual), row[6].as_str().unwrap(), "{climate:?}");
+fn original_surfaces_match_biome_materials() {
+    let surface = Surface::new(17).unwrap();
+    for (name, material) in [
+        ("tidal_reach", "sand"),
+        ("saltstrand", "sand"),
+        ("abyssal_reach", "deepslate"),
+        ("rainveil", "grass_block"),
+        ("ochre_shelves", "terracotta"),
+        ("rime_crown", "snow_block"),
+        ("reed_basin", "mud"),
+    ] {
+        let mut c = Fixture {
+            surface: &surface,
+            biome: surface.biomes.id(name).unwrap(),
+            profile: "dry",
+            x: 0,
+            top: 80,
+            y: 79,
+        };
+        let result = surface.rules.apply(&mut c).unwrap();
+        assert_eq!(crate::materials::get(result).source, material);
+        assert_eq!(
+            surface.by_biome[c.biome as usize].apply(&mut c),
+            Some(result)
+        );
     }
 }
 #[test]
@@ -351,4 +353,47 @@ fn debug_biome_follows_the_generated_grid_across_horizontal_and_vertical_travel(
             );
         }
     }
+}
+
+#[test]
+fn biome_boundaries_can_cross_inside_the_old_four_metre_cells() {
+    use crate::worldgen::{Generator, TerrainSampler};
+    let generator = Generator::new(1794608088350652100).unwrap();
+    let mut sampler = generator.sampler();
+    let mut cache = Cache::default();
+    let mut fine_transition = false;
+    let sample = |cache: &mut Cache, sampler: &mut TerrainSampler<'_>, x: f64, z: f64| {
+        let ground = sampler.feature_ground(x, z).y;
+        cache.biome(&generator.surface, sampler, [x, ground - 0.0625, z])
+    };
+    // Locate a real surface edge before testing its voxel-scale position. A
+    // fixed Y/short strip can become a single biome when terrain is retuned.
+    for z in [-256.0, -128.0, 0.0, 128.0, 256.0] {
+        let mut previous = sample(&mut cache, &mut sampler, -512.0, z);
+        for cell in -128..128 {
+            let x = cell as f64 * 4.0;
+            let end = sample(&mut cache, &mut sampler, x + 4.0, z);
+            if previous != end {
+                for voxel in 1..64 {
+                    let id = sample(&mut cache, &mut sampler, x + voxel as f64 / 16.0, z);
+                    if previous != id {
+                        fine_transition = true;
+                        break;
+                    }
+                    previous = id;
+                }
+            }
+            previous = end;
+            if fine_transition {
+                break;
+            }
+        }
+        if fine_transition {
+            break;
+        }
+    }
+    assert!(
+        fine_transition,
+        "Biome edges must not be pinned to the old coarse grid"
+    );
 }

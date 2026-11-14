@@ -1,4 +1,4 @@
-//! Every biome in the pinned table has an explicit ecological treatment.
+//! Every biome in the climate table has an explicit ecological treatment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Habitat {
     Meadow,
@@ -22,6 +22,7 @@ pub enum Habitat {
     River,
     FrozenRiver,
     Ocean,
+    DeepOcean,
     ColdOcean,
     Reef,
     Lush,
@@ -32,6 +33,22 @@ pub enum Habitat {
 pub fn habitat(name: &str) -> Habitat {
     use Habitat::*;
     match name {
+        "tidal_reach" => Ocean,
+        "willow_run" | "stillwater" => River,
+        "frostflow" => FrozenRiver,
+        "abyssal_reach" => DeepOcean,
+        "glimmerdeep" => Sulfur,
+        "saltstrand" => Beach,
+        "frostmere" => Snow,
+        "amber_steppe" => Savanna,
+        "rainveil" => Jungle,
+        "silverwood" => Birch,
+        "windworn_heath" => Meadow,
+        "ochre_shelves" => Badlands,
+        "rime_crown" => Alpine,
+        "reed_basin" => Wetland,
+        "rootvault" => Lush,
+        "hollowstone" => Dripstone,
         "plains" | "meadow" => Meadow,
         "sunflower_plains" => Sunflower,
         "bamboo_jungle" => Bamboo,
@@ -84,7 +101,12 @@ impl Habitat {
     pub fn aquatic(self) -> bool {
         matches!(
             self,
-            Self::River | Self::FrozenRiver | Self::Ocean | Self::ColdOcean | Self::Reef
+            Self::River
+                | Self::FrozenRiver
+                | Self::Ocean
+                | Self::DeepOcean
+                | Self::ColdOcean
+                | Self::Reef
         )
     }
     pub fn cave(self) -> bool {

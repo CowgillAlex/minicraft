@@ -52,6 +52,10 @@ impl Showcase {
                 Habitat::Snow | Habitat::Alpine | Habitat::FrozenRiver => SNOW,
                 Habitat::Mushroom => MYCELIUM,
                 _ if underwater => GRAVEL,
+                Habitat::Lush => GRASS,
+                Habitat::Dripstone => CALCITE,
+                Habitat::Sulfur => DEEPSLATE,
+                Habitat::DeepOcean => DEEPSLATE,
                 _ if cave => STONE,
                 _ => GRASS,
             }

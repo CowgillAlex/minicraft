@@ -7,6 +7,10 @@ use super::{
 use crate::materials::*;
 use glam::DVec3 as V;
 pub fn grow(out: &mut Vec<P>, base: V, depth: f64, kind: Habitat, rng: &mut Rng) {
+    // The abyss has sparse low growth rather than a forest of tall kelp.
+    if kind == Habitat::DeepOcean && rng.unit() > 0.18 {
+        return;
+    }
     if kind == Habitat::Reef && rng.unit() < 0.6 {
         let color = [CORAL_PINK, CORAL_BLUE, CORAL_GOLD][rng.index(3)];
         let top = base + V::Y * (0.3 + rng.unit() * 0.5);
@@ -19,7 +23,11 @@ pub fn grow(out: &mut Vec<P>, base: V, depth: f64, kind: Habitat, rng: &mut Rng)
         }
         return;
     }
-    let kelp = depth > 2. && !matches!(kind, Habitat::River | Habitat::FrozenRiver);
+    let kelp = depth > 2.
+        && !matches!(
+            kind,
+            Habitat::River | Habitat::FrozenRiver | Habitat::DeepOcean
+        );
     let h = if kelp {
         (1.5 + rng.unit() * 4.).min(depth - 0.15)
     } else {

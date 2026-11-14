@@ -28,6 +28,7 @@ impl Density {
                 blended: Vec::new(),
                 roots: [0; 5],
                 climate: [0; 6],
+                waterways: None,
                 min_y: number(&data["noise"], "min_y")? as i32,
                 height: number(&data["noise"], "height")? as i32,
                 sea_level: number(&data, "sea_level")? as i32,
@@ -59,6 +60,12 @@ impl Density {
         .enumerate()
         {
             builder.graph.climate[i] = builder.parse(&data["router"][name])?;
+        }
+        if data["surface_water"].as_bool().unwrap_or(false) {
+            builder.graph.waterways = Some([
+                builder.reference("river_distance")?,
+                builder.reference("pool_shape")?,
+            ]);
         }
         Ok(builder.graph)
     }

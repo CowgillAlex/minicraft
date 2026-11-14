@@ -12,6 +12,10 @@ pub enum Rule {
 #[derive(Clone)]
 pub enum Condition {
     Biome(Vec<Id>),
+    CaveGrowth {
+        min: f64,
+        max: f64,
+    },
     Noise {
         index: usize,
         min: f64,
@@ -49,6 +53,7 @@ pub trait Context {
     fn biome(&mut self) -> Id;
     fn cold(&mut self) -> bool;
     fn noise(&mut self, index: usize) -> f64;
+    fn cave_growth(&mut self) -> f64;
     fn surface_depth(&mut self) -> f64;
     fn secondary(&mut self) -> f64;
     fn above(&mut self) -> f64;
@@ -169,6 +174,10 @@ impl Condition {
                     .map(|s| biomes.id(s.as_str().unwrap()))
                     .collect::<Result<_, _>>()?,
             ),
+            "cave_growth" => Self::CaveGrowth {
+                min: num(v, "min_threshold"),
+                max: num(v, "max_threshold"),
+            },
             "noise_threshold" => Self::Noise {
                 index: *noises
                     .get(
@@ -216,6 +225,10 @@ impl Condition {
     fn partial(&self, c: &mut impl Context) -> Option<bool> {
         Some(match self {
             Self::Biome(ids) => ids.contains(&c.biome()),
+            Self::CaveGrowth { min, max } => {
+                let v = c.cave_growth();
+                v >= *min && v <= *max
+            }
             Self::Noise { index, min, max } => {
                 let v = c.noise(*index);
                 v >= *min && v <= *max

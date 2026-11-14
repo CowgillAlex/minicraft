@@ -1,4 +1,5 @@
 mod aquifer;
+pub(crate) mod atlas;
 mod biome_probe;
 mod biomes;
 pub use biome_probe::BiomeProbe;
@@ -80,9 +81,6 @@ impl TerrainSampler<'_> {
 
     pub fn climate(&mut self, point: [f64; 3]) -> [f64; 6] {
         std::array::from_fn(|i| self.density.eval(self.density.density.climate[i], point))
-    }
-    pub fn depth(&mut self, point: [f64; 3]) -> f64 {
-        self.density.eval(self.density.density.climate[4], point)
     }
     pub fn decorate(&mut self, origin: [i32; 3], data: &mut crate::chunk::Chunk) {
         let mut cache = std::mem::take(&mut self.surface_cache);

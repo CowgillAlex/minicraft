@@ -1,6 +1,109 @@
 use super::*;
 #[test]
-fn every_pinned_biome_has_a_feature_profile() {
+fn living_cave_recipes_include_grass_petals_and_emissive_centres() {
+    let mut shapes = Vec::new();
+    let mut rng = Rng::new(742, "living-cave-test", [0; 3]);
+    for _ in 0..8 {
+        plants::detail(&mut shapes, V::ZERO, Habitat::Lush, &mut rng);
+    }
+    for material in [GRASS_BLADE, STEM, LIGHT] {
+        assert!(shapes.iter().any(|p| p.material == material));
+    }
+    assert!(shapes
+        .iter()
+        .any(|p| matches!(p.material, PETAL_BLUE | PETAL_PINK | PETAL_WHITE)));
+}
+
+#[test]
+fn cave_flower_lights_are_discovered_above_the_old_cave_height_limit() {
+    use crate::{light_field::LightSource, world::World};
+    let generator = crate::worldgen::Generator::new(742).unwrap();
+    let mut sampler = generator.sampler();
+    let base = V::new(20.0, 280.0, 28.0);
+    let mut shapes = Vec::new();
+    plants::cave_flower(&mut shapes, base, &mut Rng::new(742, "light-test", [0; 3]));
+    sampler.features.cave.insert([2, 35, 3], Arc::new(shapes));
+    let mut world = World::with_height(384 * 16);
+    world.infinite = true;
+    let preview = crate::worldgen::preview::Preview {
+        features: true,
+        surfaces: true,
+        ..Default::default()
+    };
+    world.noise_preview = Some(preview);
+    let origin = std::array::from_fn(|i| (base[i] * 16.0) as i32 - preview.origin[i] * 16 - 8);
+    let mut sky = Default::default();
+    let mut tiles = Default::default();
+    let emitters = {
+        let mut source =
+            crate::light_tiles::Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false);
+        let points = source.emitters(origin, [12; 3]);
+        assert!(!points.is_empty());
+        for &point in &points {
+            assert_eq!(source.material(point), LIGHT);
+        }
+        points
+    };
+    for p in emitters {
+        world.set(p[0], p[1], p[2], AIR);
+    }
+    let mut source =
+        crate::light_tiles::Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false);
+    assert!(source.emitters(origin, [12; 3]).is_empty());
+}
+
+#[test]
+fn generated_rootvaults_have_life_and_real_underground_light() {
+    use crate::{
+        light_field::{LightField, LightSource},
+        world::World,
+    };
+    let generator = crate::worldgen::Generator::new(742).unwrap();
+    let mut sampler = generator.sampler();
+    let key = [-5, 2, -6];
+    let shapes = placement::cave_area(&mut sampler, key);
+    for material in [GRASS_BLADE, LIGHT] {
+        assert!(shapes.iter().any(|p| p.material == material));
+    }
+    assert!(shapes
+        .iter()
+        .any(|p| matches!(p.material, PETAL_BLUE | PETAL_PINK | PETAL_WHITE)));
+    let preview = crate::worldgen::preview::Preview {
+        seed: 742,
+        features: true,
+        surfaces: true,
+        ..Default::default()
+    };
+    let mut world = World::with_height(384 * 16);
+    world.infinite = true;
+    world.noise_preview = Some(preview);
+    let origin = std::array::from_fn(|i| key[i] * 128 - preview.origin[i] * 16);
+    let mut sky = Default::default();
+    let mut tiles = Default::default();
+    let emitters = {
+        let mut source =
+            crate::light_tiles::Source::new(&world, &mut sampler, &mut sky, &mut tiles, &|| false);
+        let emitters = source.emitters(origin, [32; 3]);
+        assert!(
+            !emitters.is_empty(),
+            "Seeded cave flora must light the cave"
+        );
+        let near = emitters[0].map(|v| v - 8);
+        let field = LightField::build_sampled(&world, near, [8; 3], &mut source).unwrap();
+        assert!(
+            field.pixels.chunks_exact(2).filter(|v| v[0] > 0).count() > 1,
+            "Light must spread beyond the emitter"
+        );
+        emitters
+    };
+    for point in emitters {
+        let p = preview.point(point);
+        assert_eq!(sampler.world_material(p, true, true), LIGHT);
+        assert_eq!(sampler.world_optical_material(p, true, true), LIGHT);
+    }
+}
+#[test]
+fn every_biome_has_a_feature_profile() {
     let data: serde_json::Value =
         serde_json::from_str(include_str!("../../../assets/worldgen/biomes.json")).unwrap();
     for row in data.as_array().unwrap() {

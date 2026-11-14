@@ -110,18 +110,32 @@ pub(super) fn surface_area(sampler: &mut TerrainSampler<'_>, key: [i32; 2]) -> V
 }
 pub(super) fn cave_area(sampler: &mut TerrainSampler<'_>, key: [i32; 3]) -> Vec<Primitive> {
     let mut out = Vec::new();
+    let min = key.map(|v| v as f64 * 8.0);
+    if sampler
+        .uniform_material(min, min.map(|v| v + 8.0))
+        .is_some()
+    {
+        return out;
+    }
     let mut rng = Rng::new(sampler.seed, "cave", key);
     for z in 0..3 {
         for x in 0..3 {
-            let px = key[0] as f64 * 8. + 1. + x as f64 * 2.5;
-            let pz = key[2] as f64 * 8. + 1. + z as f64 * 2.5;
+            let px = key[0] as f64 * 8. + 1. + x as f64 * 2.5 + rng.signed() * 0.7;
+            let pz = key[2] as f64 * 8. + 1. + z as f64 * 2.5 + rng.signed() * 0.7;
             for y in 0..8 {
                 let p = V::new(px, key[1] as f64 * 8. + y as f64, pz);
                 if sampler.material_fast(p.to_array()) == STONE
                     && sampler.material_fast((p - V::Y).to_array()) == AIR
                 {
                     let (kind, _) = sampler.feature_habitat((p - V::Y).to_array());
-                    if matches!(kind, Habitat::Lush | Habitat::Dripstone) {
+                    let patch = sampler.surface.cave_growth(p.to_array());
+                    if matches!(kind, Habitat::Lush | Habitat::Dripstone)
+                        && (if kind == Habitat::Lush {
+                            patch > 0.06 && rng.unit() < 0.45
+                        } else {
+                            patch < -0.12 && rng.unit() < 0.5
+                        })
+                    {
                         let mut base = p;
                         for _ in 0..16 {
                             if sampler.material_fast((base - V::Y * 0.0625).to_array()) == STONE {
@@ -146,6 +160,15 @@ pub(super) fn cave_area(sampler: &mut TerrainSampler<'_>, key: [i32; 3]) -> Vec<
                             24,
                         ));
                         if kind == Habitat::Lush {
+                            if rng.unit() < 0.18 {
+                                out.push(Primitive::ellipsoid(
+                                    end + V::Y * 0.12,
+                                    V::splat(0.1),
+                                    LIGHT,
+                                    Replace::Air,
+                                    35,
+                                ));
+                            }
                             for j in 1..5 {
                                 out.push(Primitive::ellipsoid(
                                     base.lerp(end, j as f64 / 5.),
@@ -176,11 +199,23 @@ pub(super) fn cave_area(sampler: &mut TerrainSampler<'_>, key: [i32; 3]) -> Vec<
                     }
                 }
                 base.y += 0.0625;
+                let patch = sampler
+                    .surface
+                    .cave_growth((base - V::Y * 0.0625).to_array());
+                let eligible = match kind {
+                    Habitat::Lush => patch > 0.06 && rng.unit() < 0.8,
+                    Habitat::Dripstone => patch < -0.12 && rng.unit() < 0.5,
+                    Habitat::Sulfur => patch > 0.22 && rng.unit() < 0.4,
+                    _ => rng.unit() < 0.25,
+                };
+                if !eligible {
+                    continue;
+                }
                 plants::detail(&mut out, base, kind, &mut rng);
-                if kind == Habitat::Lush {
+                if kind == Habitat::Lush && rng.unit() < 0.15 {
                     out.push(Primitive::ellipsoid(
                         base + V::Y * 0.025,
-                        V::new(0.7, 0.04, 0.6),
+                        V::new(0.2 + rng.unit() * 0.2, 0.03, 0.15 + rng.unit() * 0.2),
                         MOSS,
                         Replace::Air,
                         20,

@@ -15,6 +15,7 @@ pub(super) fn surface(sampler: &mut Sampler<'_>, x: i32, z: i32) -> i32 {
             blended: Vec::new(),
             roots: [root; 5],
             climate: [root; 6],
+            waterways: None,
             min_y: min,
             height: sampler.density.height,
             sea_level: sampler.density.sea_level,
