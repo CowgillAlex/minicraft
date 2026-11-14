@@ -4,7 +4,14 @@ Windows builds and their downloads are archived in [GitHub Releases](https://git
 
 Six builds were made between commits, so their exact source snapshots are unavailable: v0.1.0, v0.1.1, v0.1.2, v0.1.3, v0.2.0 and v0.6.1. Their release notes identify the later retained source snapshot used by the tag. The original Windows binaries are preserved unchanged.
 
-## [v0.18.0: Stone UI and editable hotbar](https://github.com/CowgillAlex/minicraft/releases/tag/v0.18.0)
+## [v0.18.0: Original worlds and stone UI](https://github.com/CowgillAlex/minicraft/releases/tag/v0.18.0)
+
+- Generate terrain from MiniCraft's own seeded density graph: broad continental relief, rolling ridges, meandering river channels, pond basins and deep oceans where continental uplift fades out.
+- Replace the imported biome table with 17 original biomes whose eligibility distinguishes land, coasts, rivers, ponds, shallow and deep oceans and covered caves.
+- Sample biomes at voxel spacing from interpolated climate nodes, with coherent material transitions including stone/deepslate.
+- Add Rootvault cave growth with flowers and real light emitters, plus Hollowstone and Glimmerdeep patches; cave surfaces stay predominantly stone.
+- Fill exposed basins to sea level while covered caves keep independent aquifers.
+- Add headless `--biome-map` and `--terrain-audit` diagnostics. Seeds no longer reproduce the layouts of earlier versions.
 
 - Restyle every menu with square bevelled stone panels and buttons, hard text shadows and a shared style module.
 - Use switches for every on/off option, show cycling graphics values with an arrow, and add arrows to buttons that open another page.

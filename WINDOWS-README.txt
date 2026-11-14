@@ -193,8 +193,11 @@ not a separate ray-traced point shadow for every lamp.
 WORLD
 A metre-sized block contains 16 x 16 x 16 voxels. Each voxel is 6.25 cm wide.
 The default scene streams an infinite horizontal world with biome-driven
-surfaces. It ports the Paper-Minecraft PR #1 density graph, aquifer, biome
-selection and surface rules. Terrain is sampled every 6.25 cm at its original scale. The title
+surfaces. Terrain uses MiniCraft's own seeded 3D density graph, with broad
+ridges, meandering rivers, pond basins and deep oceans, sampled every
+6.25 cm. Seventeen original biomes cover land, coasts, rivers, ponds, oceans
+and caves. Seeds from versions before 0.18.0 produce different worlds. The
+noise and density evaluator originated from Paper-Minecraft. The title
 screen chooses the seed. The default source origin is 120,-64,-20, covering
 the full -64 to 320 metre vertical range. Only nearby terrain is resident.
 
@@ -232,14 +235,16 @@ Optional launch arguments:
 --noise-benchmark             Measure a raw 32-cubed voxel page without a GPU.
 --noise-only                  Disable biome surface decoration.
 --worldgen-benchmark          Time a finite 40 metre wide volume.
+--biome-map map.json          Export ground/cave habitats around the origin.
+--terrain-audit audit.json    Measure ground slopes at 1,024 sites.
 --reference-worldgen         Disable uniform skipping/prepared evaluation.
 
-Aquifers now use 3D seeded cells, full X/Z surface checks and 3D pressure
-barriers. Fluid regions vary along both horizontal axes instead of extruding
-the old 2D layout. Preliminary heights now retain the original one-metre
-positive-density scan at exact columns. Fine-voxel pressure centres and thin
-wet/dry seals fix leaking boundaries; corrected heights remove spurious
-sea-level water volumes. Terrain density and its metre scale are unchanged.
+Exposed basins fill to sea level, while covered caves keep independent 3D
+aquifers with pressure barriers and thin wet/dry seals. Biomes are chosen at
+voxel spacing from interpolated climate, so material boundaries blend
+coherently. Rootvault caves grow plants, flowers and real light sources;
+Hollowstone and Glimmerdeep add other cave patches. Cave surfaces remain
+mostly stone.
 Water is translucent: shallow water reveals the bottom and deeper water
 adds blue tint. Animated reflections and day/night shadows remain active.
 Surface rules add grass/dirt, gravel seabeds, sand/sandstone, red sand,
@@ -247,7 +252,7 @@ badlands terracotta bands, mountain snow/ice/calcite, mud, podzol, mycelium,
 sulfur/cinnabar, and bedrock/deepslate transitions. Layer depths retain metre
 scale; a one-metre layer is 16 tiny voxels deep. Surface decoration runs on
 the terrain workers and does not require loaded neighboring pages.
-All 56 biomes now have a decoration profile: branching trees and leaf sprays,
+Biomes have decoration profiles: branching trees and leaf sprays,
 seeded grass, flowers with separate parts, wheat/grains, bamboo, cacti, fungi,
 alpine/cave growth, river plants, kelp, seagrass and warm-ocean coral.
 Occasional cottages fit gentle dry sites, with warm lamps and editable doors.
